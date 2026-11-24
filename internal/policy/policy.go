@@ -47,6 +47,11 @@ type Policy struct {
 	FixableOnly bool
 	// BlockSecrets makes every embedded secret a violation.
 	BlockSecrets bool
+	// BlockMalware makes every malware detection a violation.
+	BlockMalware bool
+	// BlockUnscanned makes every file the malware scan could not fully read
+	// (too large, or past a ClamAV limit) a violation.
+	BlockUnscanned bool
 	// SLA is the number of days to fix a vulnerability once a fix exists.
 	// Zero means no deadline. Period summaries measure remediation with it.
 	SLADays SLADays
@@ -79,11 +84,13 @@ func (p Policy) SLA(sev model.Severity) int {
 // Default warns about fixable Critical vulnerabilities and any secret.
 func Default() Policy {
 	return Policy{
-		Mode:         ModeWarn,
-		MinSeverity:  model.SeverityCritical,
-		FixableOnly:  true,
-		BlockSecrets: true,
-		SLADays:      SLADays{Critical: 15, High: 30, Medium: 90},
+		Mode:           ModeWarn,
+		MinSeverity:    model.SeverityCritical,
+		FixableOnly:    true,
+		BlockSecrets:   true,
+		BlockMalware:   true,
+		BlockUnscanned: true,
+		SLADays:        SLADays{Critical: 15, High: 30, Medium: 90},
 	}
 }
 
@@ -99,6 +106,8 @@ type rawPolicy struct {
 		Severity    *string `yaml:"severity"`
 		FixableOnly *bool   `yaml:"fixable_only"`
 		Secrets     *bool   `yaml:"secrets"`
+		Malware     *bool   `yaml:"malware"`
+		Unscanned   *bool   `yaml:"unscanned_files"`
 	} `yaml:"fail_on"`
 	SLADays struct {
 		Critical *int `yaml:"critical"`
@@ -138,6 +147,12 @@ func Parse(data []byte) (Policy, error) {
 	}
 	if raw.FailOn.Secrets != nil {
 		p.BlockSecrets = *raw.FailOn.Secrets
+	}
+	if raw.FailOn.Malware != nil {
+		p.BlockMalware = *raw.FailOn.Malware
+	}
+	if raw.FailOn.Unscanned != nil {
+		p.BlockUnscanned = *raw.FailOn.Unscanned
 	}
 	for _, f := range []struct {
 		name string

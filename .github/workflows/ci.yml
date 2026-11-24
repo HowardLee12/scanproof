@@ -77,7 +77,25 @@ jobs:
           docker run --rm -v "$PWD/out:/out" -v "$PWD/store:/store" \
             scanproof:ci report --store file:///store --from "$today" --to "$today" --out /out/summary
           test -s out/summary/summary.pdf && test -s out/summary/population.csv
+      - name: Build the full image without downloading ClamAV signatures
+        run: docker build --target full --build-arg CLAMAV_DB=none -t scanproof:ci-full .
+      - name: Malware scan finds a test file
+        run: |
+          mkdir -p mal/ctx
+          printf '%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > mal/ctx/eicar.com
+          printf 'FROM alpine:3.20\nCOPY eicar.com /app/tests/eicar.com\n' > mal/ctx/Dockerfile
+          docker build -t scanproof-test/eicar:ci mal/ctx
+          # A one-line signature instead of the full ClamAV database, so CI
+          # never downloads from the ClamAV mirrors.
+          hex=$(printf 'EICAR-STANDARD-ANTIVIRUS-TEST-FILE' | od -An -tx1 | tr -d ' \n')
+          echo "ScanProof.Test.EICAR:0:*:${hex}" > mal/test.ndb
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/mal:/mal" \
+            scanproof:ci-full scan --malware --clamav-db /mal/test.ndb --out /mal/out -- scanproof-test/eicar:ci
+          jq -e '.malware.findings | length == 1 and .[0].path == "/app/tests/eicar.com"' mal/out/results.json
+          test -s mal/out/report.pdf
       - uses: actions/upload-artifact@v4
         with:
           name: sample-evidence
-          path: out/
+          path: |
+            out/
+            mal/out/

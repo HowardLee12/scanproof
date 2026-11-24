@@ -26,6 +26,21 @@ type scanOptions struct {
 	TrivyBin     string
 	TypstBin     string
 	Timeout      time.Duration
+	Platform     string
+	Malware      malwareOptions
+}
+
+type malwareOptions struct {
+	Enabled      bool
+	ClamscanBin  string
+	ClamAVDB     string
+	YaraRules    string
+	YaraBin      string
+	MaxFileMB    int64
+	WorkDir      string
+	DockerDaemon bool
+	Update       bool
+	FreshclamBin string
 }
 
 func parseScanOptions(args []string, stderr io.Writer) (scanOptions, error) {
@@ -44,7 +59,18 @@ func parseScanOptions(args []string, stderr io.Writer) (scanOptions, error) {
 	fs.StringVar(&opts.TrivyResults, "trivy-results", "", "use an existing Trivy JSON report instead of running Trivy")
 	fs.StringVar(&opts.TrivyBin, "trivy", "trivy", "path to the trivy binary")
 	fs.StringVar(&opts.TypstBin, "typst", "typst", "path to the typst binary")
-	fs.DurationVar(&opts.Timeout, "timeout", 30*time.Minute, "maximum time for the scan")
+	fs.DurationVar(&opts.Timeout, "timeout", 30*time.Minute, "maximum time for the whole scan")
+	fs.StringVar(&opts.Platform, "platform", "", "image platform for multi-platform images, e.g. linux/arm64 (default: this machine's)")
+	fs.BoolVar(&opts.Malware.Enabled, "malware", false, "also scan every file in the image for malware (needs clamscan)")
+	fs.StringVar(&opts.Malware.ClamscanBin, "clamscan", "clamscan", "path to the clamscan binary")
+	fs.StringVar(&opts.Malware.ClamAVDB, "clamav-db", "", "ClamAV signature directory (default: clamscan's own)")
+	fs.StringVar(&opts.Malware.YaraRules, "yara-rules", "", "YARA rule file or directory; enables YARA")
+	fs.StringVar(&opts.Malware.YaraBin, "yara", "yara", "path to the yara binary")
+	fs.Int64Var(&opts.Malware.MaxFileMB, "malware-max-file-mb", 512, "skip (and list) files larger than this many MB")
+	fs.StringVar(&opts.Malware.WorkDir, "malware-workdir", "", "where to unpack the image for the malware scan; needs room for the whole image")
+	fs.BoolVar(&opts.Malware.DockerDaemon, "docker-daemon", true, "look for the image in the local Docker daemon before the registry")
+	fs.BoolVar(&opts.Malware.Update, "clamav-update", false, "run freshclam before the malware scan (mind ClamAV's download limits)")
+	fs.StringVar(&opts.Malware.FreshclamBin, "freshclam", "freshclam", "path to the freshclam binary")
 	fs.Usage = func() {
 		fmt.Fprint(stderr, "Usage: scanproof scan [flags] IMAGE\n\nFlags:\n")
 		fs.PrintDefaults()
@@ -65,6 +91,12 @@ func parseScanOptions(args []string, stderr io.Writer) (scanOptions, error) {
 		return scanOptions{}, errors.New("an image reference is required (or --trivy-results)")
 	}
 
+	if opts.Malware.Enabled && opts.Image == "" {
+		return scanOptions{}, errors.New("--malware needs the image reference, even with --trivy-results")
+	}
+	if opts.Malware.MaxFileMB <= 0 || opts.Malware.MaxFileMB > 4000 {
+		return scanOptions{}, errors.New("--malware-max-file-mb must be between 1 and 4000 (ClamAV's limit)")
+	}
 	if opts.Timeout <= 0 {
 		return scanOptions{}, fmt.Errorf("--timeout must be greater than zero, got %s", opts.Timeout)
 	}

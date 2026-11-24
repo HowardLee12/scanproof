@@ -43,7 +43,7 @@ func TestPDFView(t *testing.T) {
 	if v.SummaryID != "PS-20261001-ABC123" || v.PeriodLabel != "2026-07-01 to 2026-09-30 · 92 days" {
 		t.Errorf("header = %+v", v)
 	}
-	if len(v.Tiles) != 6 || v.Tiles[0].Value != "7" {
+	if len(v.Tiles) != 8 || v.Tiles[0].Value != "7" {
 		t.Errorf("tiles = %+v", v.Tiles)
 	}
 	if len(v.Remediation) != 3 || v.Remediation[1][4] != "0 (0%)" {

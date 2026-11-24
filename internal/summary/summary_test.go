@@ -262,3 +262,13 @@ func TestNewSummaryID(t *testing.T) {
 		t.Fatalf("got %q, %v", id, err)
 	}
 }
+
+func TestCoverageCountsMalwareChecks(t *testing.T) {
+	withMalware := scanDoc("SR-M", "repo/app:1", "sha256:m", day(3), report.TriggerCI, policy.VerdictWarn)
+	withMalware.Malware = &report.MalwareSection{Findings: []policy.MalwareFinding{{}, {}}}
+	plain := scanDoc("SR-P", "repo/app:1", "sha256:m", day(4), report.TriggerCI, policy.VerdictPass)
+	s := Build(Input{GeneratedAt: periodTo.AddDate(0, 0, 2), Period: testPeriod(), Policy: policy.Default(), Scans: loaded(withMalware, plain)})
+	if s.Coverage.MalwareScans != 1 || s.Coverage.MalwareFound != 2 {
+		t.Fatalf("coverage = %+v", s.Coverage)
+	}
+}

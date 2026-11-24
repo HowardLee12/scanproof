@@ -141,5 +141,10 @@ func slim(doc report.Document) report.Document {
 		})
 	}
 	doc.Vulnerabilities = vulns
+	if doc.Malware != nil {
+		m := *doc.Malware
+		m.Skipped = nil
+		doc.Malware = &m
+	}
 	return doc
 }

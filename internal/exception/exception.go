@@ -118,7 +118,7 @@ func validate(list []Exception) error {
 		case strings.TrimSpace(ex.ID) == "":
 			return fmt.Errorf("%s: id is required", where)
 		case strings.TrimSpace(ex.Finding) == "":
-			return fmt.Errorf("%s: finding is required (a CVE ID or a secret rule ID)", where)
+			return fmt.Errorf("%s: finding is required (a CVE ID, a secret rule ID or a malware signature)", where)
 		case strings.TrimSpace(ex.Reason) == "":
 			return fmt.Errorf("%s: reason is required", where)
 		case ex.Expires.IsZero():
@@ -155,6 +155,12 @@ func (e Exception) MatchesVulnerability(v model.Vulnerability) bool {
 // must name the file; without a path it never matches.
 func (e Exception) MatchesSecret(s model.Secret) bool {
 	return e.Path != "" && strings.EqualFold(e.Finding, s.RuleID) && samePath(e.Path, s.Target)
+}
+
+// MatchesMalware reports whether the exception covers a malware detection.
+// Like secrets, it must name the file.
+func (e Exception) MatchesMalware(d model.MalwareDetection) bool {
+	return e.Path != "" && strings.EqualFold(e.Finding, d.Signature) && samePath(e.Path, d.Path)
 }
 
 func samePath(a, b string) bool {

@@ -144,6 +144,22 @@
   note[The matched text is never stored or printed.]
 }
 
+#if d.malware {
+  section("Malware", note: str(d.malware_findings.len()) + " detections")
+  data-table((1fr, 30mm, 40mm, 40mm), ("Engine", "Version", "Signatures", "Signatures updated"), d.malware_engines)
+  note(d.malware_stats)
+  if d.malware_findings.len() == 0 {
+    note[No malware was detected.]
+  } else {
+    data-table((20mm, 1fr, 1fr, 12mm, 28mm), ("Engine", "Signature", "File", "Layer", "Status"), d.malware_findings,
+      aligns: (left, left, left, right, left))
+  }
+  if d.malware_skipped.len() > 0 {
+    data-table((1fr, 12mm, 18mm, 60mm), ("Not fully scanned", "Layer", "Size", "Reason"), d.malware_skipped,
+      aligns: (left, right, right, left))
+  }
+}
+
 #section("Approved exceptions", note: str(d.exceptions_applied.len()) + " applied to this image")
 #if d.exceptions_applied.len() == 0 {
   note[No exceptions were applied.]
@@ -170,6 +186,9 @@
   (18mm, 62mm, 1fr),
   ("Criteria", "Requirement", "What this report shows"),
   (
+    ..if d.malware {
+      (("CC6.8", "Prevent or detect and act upon unauthorized or malicious software.", d.cc68_text),)
+    } else { () },
     ("CC7.1", "Detect new vulnerabilities and configuration changes that introduce them.", "Known vulnerabilities were identified against a vulnerability database with the update time shown above."),
     ("CC8.1", "Changes are tested and approved before they are implemented.", "The scan ran in the pipeline for the change shown above, and the policy result was recorded before deployment."),
   ),

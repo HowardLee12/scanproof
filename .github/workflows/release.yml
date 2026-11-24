@@ -23,12 +23,27 @@ jobs:
       - name: Image name
         id: meta
         run: echo "image=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      - name: Push the default image
+        uses: docker/build-push-action@v6
         with:
           context: .
+          target: default
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: VERSION=${{ github.ref_name }}
           tags: |
             ${{ steps.meta.outputs.image }}:${{ github.ref_name }}
             ${{ steps.meta.outputs.image }}:latest
+      - name: Push the full image (ClamAV and YARA, signatures as of the release, downloaded once)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: full
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            CLAMAV_DB=download
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ github.ref_name }}-full
+            ${{ steps.meta.outputs.image }}:latest-full

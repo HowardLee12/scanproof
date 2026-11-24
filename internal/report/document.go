@@ -40,10 +40,26 @@ type SeverityCount struct {
 
 // Summary holds the headline numbers of a report.
 type Summary struct {
-	Vulnerabilities []SeverityCount `json:"vulnerabilities"`
-	Secrets         int             `json:"secrets"`
-	SecretsAccepted int             `json:"secrets_accepted"`
-	Violations      int             `json:"violations"`
+	Vulnerabilities   []SeverityCount `json:"vulnerabilities"`
+	Secrets           int             `json:"secrets"`
+	SecretsAccepted   int             `json:"secrets_accepted"`
+	MalwareDetections int             `json:"malware_detections"`
+	MalwareAccepted   int             `json:"malware_accepted"`
+	UnscannedFiles    int             `json:"unscanned_files"`
+	Violations        int             `json:"violations"`
+}
+
+// MalwareSection is the malware scan, after exceptions and rules.
+type MalwareSection struct {
+	Engines      []model.MalwareEngine   `json:"engines"`
+	ImageSource  string                  `json:"image_source"`
+	ConfigDigest string                  `json:"config_digest"`
+	Platform     string                  `json:"platform,omitempty"`
+	Layers       int                     `json:"layers"`
+	FilesScanned int                     `json:"files_scanned"`
+	BytesScanned int64                   `json:"bytes_scanned"`
+	Skipped      []model.SkippedFile     `json:"skipped"`
+	Findings     []policy.MalwareFinding `json:"findings"`
 }
 
 // PolicyInfo records which rules were applied and their outcome.
@@ -81,6 +97,7 @@ type Document struct {
 	Summary         Summary                       `json:"summary"`
 	Vulnerabilities []policy.VulnerabilityFinding `json:"vulnerabilities"`
 	Secrets         []policy.SecretFinding        `json:"secrets"`
+	Malware         *MalwareSection               `json:"malware,omitempty"`
 	Exceptions      Exceptions                    `json:"exceptions"`
 }
 
@@ -140,9 +157,10 @@ func Build(in Input) Document {
 			BlockSecrets: in.Policy.BlockSecrets,
 			Rules:        orEmpty(ev.Rules),
 		},
-		Summary:         summarize(ev),
+		Summary:         summarize(ev, in.Result.Malware, in.Policy),
 		Vulnerabilities: sortedVulnerabilities(ev.Vulnerabilities),
 		Secrets:         orEmpty(ev.Secrets),
+		Malware:         malwareSection(in.Result.Malware, ev.Malware),
 		Exceptions: Exceptions{
 			Applied: orEmpty(ev.Applied),
 			Expired: orEmpty(ev.Expired),
@@ -159,7 +177,7 @@ func orEmpty[T any](s []T) []T {
 	return s
 }
 
-func summarize(ev policy.Evaluation) Summary {
+func summarize(ev policy.Evaluation, scan *model.MalwareScan, pol policy.Policy) Summary {
 	bySeverity := map[model.Severity]SeverityCount{}
 	violations := 0
 	for _, f := range ev.Vulnerabilities {
@@ -193,8 +211,40 @@ func summarize(ev policy.Evaluation) Summary {
 			violations++
 		}
 	}
+	for _, f := range ev.Malware {
+		s.MalwareDetections++
+		if f.Accepted() {
+			s.MalwareAccepted++
+		}
+		if f.Violation {
+			violations++
+		}
+	}
+	if scan != nil {
+		s.UnscannedFiles = len(scan.Skipped)
+		if pol.BlockUnscanned {
+			violations += s.UnscannedFiles
+		}
+	}
 	s.Violations = violations
 	return s
+}
+
+func malwareSection(scan *model.MalwareScan, findings []policy.MalwareFinding) *MalwareSection {
+	if scan == nil {
+		return nil
+	}
+	return &MalwareSection{
+		Engines:      orEmpty(scan.Engines),
+		ImageSource:  scan.ImageSource,
+		ConfigDigest: scan.ConfigDigest,
+		Platform:     scan.Platform,
+		Layers:       scan.Layers,
+		FilesScanned: scan.FilesScanned,
+		BytesScanned: scan.BytesScanned,
+		Skipped:      orEmpty(scan.Skipped),
+		Findings:     orEmpty(findings),
+	}
 }
 
 func sortedVulnerabilities(in []policy.VulnerabilityFinding) []policy.VulnerabilityFinding {

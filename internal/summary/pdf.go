@@ -73,6 +73,8 @@ func newPDFView(s Summary, hashes map[string]string) pdfView {
 			{"Passed", strconv.Itoa(c.Pass), fmt.Sprintf("%d warned · %d failed", c.Warn, c.Fail), "#137a3f"},
 			{"Days rescanned", fmt.Sprintf("%d / %d", c.DaysWithRescans, c.DaysInPeriod), "days with a rescan", "#123a5a"},
 			{"Scans with secrets", strconv.Itoa(c.ScansWithSecrets), "keys, tokens, passwords", "#6b7785"},
+			{"Malware checks", strconv.Itoa(c.MalwareScans), "scans that checked every file", "#123a5a"},
+			{"Malware detections", strconv.Itoa(c.MalwareFound), "across those scans", malwareAccent(c.MalwareFound)},
 			{"Open past SLA", strconv.Itoa(len(s.Overdue)), "at the end of the period", overdueAccent},
 		},
 		Remediation:       remediationRows(s.Remediation),
@@ -146,4 +148,11 @@ func plural(n int, one, many string) string {
 		return fmt.Sprintf("%d %s", n, one)
 	}
 	return fmt.Sprintf("%d %s", n, many)
+}
+
+func malwareAccent(found int) string {
+	if found > 0 {
+		return "#b42318"
+	}
+	return "#137a3f"
 }

@@ -37,6 +37,16 @@ type SecretFinding struct {
 // Accepted reports whether an active exception covers the finding.
 func (f SecretFinding) Accepted() bool { return f.ExceptionID != "" }
 
+// MalwareFinding is a malware detection after exceptions and rules are applied.
+type MalwareFinding struct {
+	model.MalwareDetection
+	ExceptionID string `json:"exception_id,omitempty"`
+	Violation   bool   `json:"violation"`
+}
+
+// Accepted reports whether an active exception covers the finding.
+func (f MalwareFinding) Accepted() bool { return f.ExceptionID != "" }
+
 // RuleResult is the outcome of one policy rule.
 type RuleResult struct {
 	Name      string `json:"name"`
@@ -49,6 +59,8 @@ type RuleResult struct {
 type Evaluation struct {
 	Vulnerabilities []VulnerabilityFinding
 	Secrets         []SecretFinding
+	// Malware is nil when no malware scan ran.
+	Malware []MalwareFinding
 	// Applied are active exceptions that accepted at least one finding.
 	Applied []exception.Exception
 	// Expired are exceptions that would have matched but have expired.
@@ -86,20 +98,43 @@ func Evaluate(res model.ScanResult, p Policy, excs []exception.Exception, now ti
 		secrets = append(secrets, SecretFinding{Secret: s, ExceptionID: id, Violation: violation})
 	}
 
+	var malware []MalwareFinding
+	malwareViolations := 0
+	if res.Malware != nil {
+		malware = make([]MalwareFinding, 0, len(res.Malware.Detections))
+		for _, d := range res.Malware.Detections {
+			id := tracker.match(func(ex exception.Exception) bool { return ex.MatchesMalware(d) })
+			violation := p.BlockMalware && id == ""
+			if violation {
+				malwareViolations++
+			}
+			malware = append(malware, MalwareFinding{MalwareDetection: d, ExceptionID: id, Violation: violation})
+		}
+	}
+
 	rules := []RuleResult{newRule(vulnerabilityRuleName(p), vulnViolations)}
 	if p.BlockSecrets {
 		rules = append(rules, newRule("No embedded secrets", secretViolations))
+	}
+	if res.Malware != nil && p.BlockMalware {
+		rules = append(rules, newRule("No malware detections", malwareViolations))
+	}
+	unscanned := 0
+	if res.Malware != nil && p.BlockUnscanned {
+		unscanned = len(res.Malware.Skipped)
+		rules = append(rules, newRule("Every file scanned for malware", unscanned))
 	}
 
 	applied, expired, unused := tracker.summary()
 	return Evaluation{
 		Vulnerabilities: vulns,
 		Secrets:         secrets,
+		Malware:         malware,
 		Applied:         applied,
 		Expired:         expired,
 		Unused:          unused,
 		Rules:           rules,
-		Verdict:         verdict(p.Mode, vulnViolations+secretViolations),
+		Verdict:         verdict(p.Mode, vulnViolations+secretViolations+malwareViolations+unscanned),
 	}
 }
 

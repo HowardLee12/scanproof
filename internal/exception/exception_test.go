@@ -163,3 +163,16 @@ func TestDateJSONRoundTrip(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
+
+func TestMatchesMalwareNeedsSignatureAndPath(t *testing.T) {
+	ex := Exception{ID: "EX-M", Finding: "Eicar-Test-Signature", Path: "app/tests/eicar.com"}
+	if !ex.MatchesMalware(model.MalwareDetection{Path: "/app/tests/eicar.com", Signature: "Eicar-Test-Signature"}) {
+		t.Error("the detection in the named file should match")
+	}
+	if ex.MatchesMalware(model.MalwareDetection{Path: "/usr/bin/eicar", Signature: "Eicar-Test-Signature"}) {
+		t.Error("the same signature in another file must not match")
+	}
+	if (Exception{ID: "X", Finding: "Eicar-Test-Signature"}).MatchesMalware(model.MalwareDetection{Path: "/a", Signature: "Eicar-Test-Signature"}) {
+		t.Error("a malware exception without a path must never match")
+	}
+}

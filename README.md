@@ -2,7 +2,7 @@
 
 ScanProof scans a container image in CI and keeps the result as evidence you can hand to an auditor.
 
-It runs [Trivy](https://github.com/aquasecurity/trivy) for vulnerabilities and embedded secrets, applies a policy and your approved exceptions, and writes:
+It runs [Trivy](https://github.com/aquasecurity/trivy) for vulnerabilities and embedded secrets, and optionally [ClamAV](https://www.clamav.net/) and YARA for malware. It then applies a policy and your approved exceptions, and writes:
 
 | File | For |
 |---|---|
@@ -76,6 +76,14 @@ scanproof rescan --store s3://acme-scan-evidence/prod --inventory kubernetes
 
 **[docs/storage.md](docs/storage.md)** explains how to set up the bucket: Object Lock retention, least-privilege IAM for CI and for the summary job, GitHub OIDC, S3-compatible services and their settings.
 
+## Malware
+
+```sh
+scanproof scan --malware example-api:1.0
+```
+
+Checks every file in the image with ClamAV, plus YARA when you pass `--yara-rules`. Use the `-full` image, which includes both engines. **[docs/malware.md](docs/malware.md)** covers keeping the signatures current, YARA rules, exceptions, and the limits.
+
 ## Policy
 
 Without a policy file, ScanProof **warns** about fixable Critical vulnerabilities and about any embedded secret. Start in warn mode, look at what it finds for a couple of weeks, then switch to enforce.
@@ -87,6 +95,8 @@ fail_on:
   severity: CRITICAL  # lowest severity that counts as a violation
   fixable_only: true  # only count vulnerabilities that have a fix
   secrets: true       # count every embedded secret
+  malware: true       # count every malware detection (with --malware)
+  unscanned_files: true  # count files the malware scan could not fully read
 sla_days:             # remediation deadlines used by period summaries
   critical: 15
   high: 30
@@ -149,6 +159,12 @@ scanproof scan [flags] IMAGE
   --pdf=false            skip report.pdf
   --sbom=false           skip sbom.cdx.json
   --store URL            upload evidence to s3://bucket/prefix or file:///path
+  --malware              also scan every file for malware (-full image)
+  --yara-rules PATH      YARA rule file or directory (with --malware)
+  --clamav-db DIR        ClamAV signature directory or file
+  --clamav-update        run freshclam before the malware scan
+  --malware-max-file-mb  skip larger files, listed in the report (default 512)
+  --platform OS/ARCH     image platform for multi-platform images
   --notify WHEN          violation | always | never (default violation)
   --trivy-results FILE   use an existing Trivy JSON report
   --trivy PATH           trivy binary (default trivy)
@@ -185,10 +201,12 @@ The PDF maps the report to SOC 2 criteria CC7.1 and CC8.1 for convenience. Your 
 - Secret findings record the rule, file and line only. The matched text is never stored or printed.
 - Values from scan results are passed to the PDF template as data, never as template code.
 - The image pins Trivy by digest and verifies the Typst download by SHA-256.
+- The malware scan unpacks every layer's regular files under generated names in a private temporary directory, so names from the image never reach the file system or scanner output. It checks that the scanner covered every file, and deletes the directory after each layer.
 
 ## Roadmap
 
-- Malware scanning with ClamAV and YARA
+- GitLab CI template
+- Malware checks in rescans of pulled images
 
 ## Development
 

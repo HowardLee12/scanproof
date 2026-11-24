@@ -44,7 +44,7 @@
 #line(length: 100%, stroke: 1.6pt + navy)
 
 #section("Coverage")
-#grid(columns: (1fr,) * 3, column-gutter: 2mm, row-gutter: 2mm, ..d.tiles.map(tile))
+#grid(columns: (1fr,) * 4, column-gutter: 2mm, row-gutter: 2mm, ..d.tiles.map(tile))
 
 #section("Remediation against SLA")
 #data-table(
