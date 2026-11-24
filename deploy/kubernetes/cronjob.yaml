@@ -34,7 +34,7 @@ spec:
                         operator: DoesNotExist
           containers:
             - name: rescan
-              image: ghcr.io/howardlee12/scanproof:v0.3.0
+              image: ghcr.io/howardlee12/scanproof:v0.1.0
               args:
                 - rescan
                 - --inventory=kubernetes
