@@ -69,14 +69,46 @@ func (r Runner) Scan(ctx context.Context, image string) (Scan, error) {
 		return Scan{}, fmt.Errorf("image reference %q must not start with '-'", image)
 	}
 
-	args := append([]string{"image", "--quiet", "--format", "json", "--scanners", "vuln,secret", "--list-all-pkgs"},
-		r.hardenedFlags()...)
+	extra := []string{}
 	if r.Platform != "" {
-		args = append(args, "--platform", r.Platform)
+		extra = append(extra, "--platform", r.Platform)
 	}
-	out, err := r.exec(ctx, r.Bin, append(args, image)...)
+	return r.scanArtifact(ctx, "image", image, extra, absentSecretConfig)
+}
+
+// ScanRootfs scans an installed directory tree for vulnerabilities and
+// secrets. Trivy's rootfs mode finds installed packages: Python dist-info
+// and egg-info metadata, Go binaries, jars and OS package databases. path
+// must be absolute, so it can never be read as a flag.
+func (r Runner) ScanRootfs(ctx context.Context, path string) (Scan, error) {
+	if !filepath.IsAbs(strings.TrimSpace(path)) {
+		return Scan{}, fmt.Errorf("directory %q must be an absolute path", path)
+	}
+	return r.scanArtifact(ctx, "rootfs", path, nil, noAllowRulesConfig)
+}
+
+// scanArtifact runs one `trivy image` or `trivy rootfs` scan with every
+// package listed, which the SBOM for later rescans needs. A trivy-secret.yaml
+// in the working directory could switch secret rules off, so the secret
+// scanner's settings file is always pinned to a file in a fresh private
+// directory, made by secretConfig. Its name is unique, because Trivy does
+// not read a top-level file named like its secret config.
+func (r Runner) scanArtifact(ctx context.Context, mode, target string, extra []string, secretConfig func(dir string) (string, error)) (Scan, error) {
+	settings, err := os.MkdirTemp("", "scanproof-trivy-")
 	if err != nil {
-		return Scan{}, fmt.Errorf("trivy scan of %s failed: %w", image, err)
+		return Scan{}, fmt.Errorf("create trivy settings directory: %w", err)
+	}
+	defer os.RemoveAll(settings)
+	config, err := secretConfig(settings)
+	if err != nil {
+		return Scan{}, err
+	}
+	args := append([]string{mode, "--quiet", "--format", "json", "--scanners", "vuln,secret", "--list-all-pkgs",
+		"--secret-config", config}, r.hardenedFlags()...)
+	args = append(args, extra...)
+	out, err := r.exec(ctx, r.Bin, append(args, target)...)
+	if err != nil {
+		return Scan{}, fmt.Errorf("trivy scan of %s failed: %w", target, err)
 	}
 	res, err := Parse(bytes.NewReader(out))
 	if err != nil {
@@ -85,9 +117,11 @@ func (r Runner) Scan(ctx context.Context, image string) (Scan, error) {
 	return Scan{Result: r.withDatabaseInfo(ctx, res), Raw: out}, nil
 }
 
-// hardenedFlags ignore settings files in the scanned repository (trivy.yaml,
-// .trivyignore) and set every filter explicitly, so the only way to accept a
-// finding is a ScanProof exception with a reason and an expiry date.
+// hardenedFlags ignore Trivy settings files in the working directory
+// (trivy.yaml, .trivyignore) and set every filter explicitly, so the only
+// way to accept a finding is a ScanProof exception with a reason and an
+// expiry date. Scans that look for secrets also pin --secret-config (see
+// scanArtifact); `trivy sbom` has no such flag.
 func (r Runner) hardenedFlags() []string {
 	timeout := r.Timeout
 	if timeout <= 0 {

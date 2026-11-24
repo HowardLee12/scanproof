@@ -189,3 +189,27 @@ func TestSenderReportsUnreachableHost(t *testing.T) {
 		t.Fatalf("expected a redacted error, got %v", err)
 	}
 }
+
+func TestNewMessageForADirectory(t *testing.T) {
+	doc := sampleDoc()
+	doc.ArtifactType = model.ArtifactDirectory
+	doc.Image = model.Image{Reference: "dir:acme-vllm:0.9.1", Digest: "sha256:" + strings.Repeat("ab", 32)}
+	doc.Directory = &model.Directory{Name: "acme-vllm", Version: "0.9.1", Path: "/mnt/shared/venvs/vllm", TreeDigest: doc.Image.Digest}
+	m := NewMessage(doc)
+	if m.Title != "ScanProof WARN: directory acme-vllm:0.9.1" {
+		t.Errorf("title = %q", m.Title)
+	}
+	fields := map[string]string{}
+	for _, f := range m.Fields {
+		fields[f.Name] = f.Value
+	}
+	if fields["Path"] != "/mnt/shared/venvs/vllm" || fields["Tree digest"] != "sha256:abababababab…" {
+		t.Errorf("fields = %v", fields)
+	}
+	if _, ok := fields["Tree digest"]; !ok {
+		t.Error("the tree digest identifies the directory and must be shown")
+	}
+	if image := NewMessage(sampleDoc()); len(image.Fields) != 5 {
+		t.Errorf("image messages keep their fields: %+v", image.Fields)
+	}
+}

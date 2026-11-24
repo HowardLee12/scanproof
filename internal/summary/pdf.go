@@ -69,7 +69,7 @@ func newPDFView(s Summary, hashes map[string]string) pdfView {
 		PeriodLabel: fmt.Sprintf("%s to %s · %s", s.Period.From, s.Period.To, plural(s.Period.Days, "day", "days")),
 		Tiles: []tile{
 			{"Scans", strconv.Itoa(c.Scans), fmt.Sprintf("%d CI · %d rescans · %d manual", c.CIScans, c.RescanScans, c.ManualScans), "#123a5a"},
-			{"Images", strconv.Itoa(c.Images), fmt.Sprintf("in %d repositories", c.Repositories), "#123a5a"},
+			{"Images", strconv.Itoa(c.Images), fmt.Sprintf("in %d repositories", c.Repositories) + strings.Replace(directoriesPhrase(c), " and ", " · ", 1), "#123a5a"},
 			{"Passed", strconv.Itoa(c.Pass), fmt.Sprintf("%d warned · %d failed", c.Warn, c.Fail), "#137a3f"},
 			{"Days rescanned", fmt.Sprintf("%d / %d", c.DaysWithRescans, c.DaysInPeriod), "days with a rescan", "#123a5a"},
 			{"Scans with secrets", strconv.Itoa(c.ScansWithSecrets), "keys, tokens, passwords", "#6b7785"},

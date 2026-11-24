@@ -30,8 +30,13 @@ var contentTypes = map[string]string{
 }
 
 // writeEvidence writes every output file, then the manifest that hashes them.
-// It returns the names of the files written, manifest last.
+// It returns the names of the files written, manifest last. The SBOM is made
+// first, so a scan that needs it and cannot have it writes nothing.
 func writeEvidence(ctx context.Context, opts scanOptions, env Env, doc report.Document, raw []byte) ([]string, error) {
+	sbom, err := makeSBOM(ctx, opts, env, raw)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(opts.OutDir, dirMode); err != nil {
 		return nil, fmt.Errorf("create output directory: %w", err)
 	}
@@ -57,7 +62,10 @@ func writeEvidence(ctx context.Context, opts scanOptions, env Env, doc report.Do
 	}
 	written := []string{resultsFile, summaryFile}
 
-	if opts.SBOM && writeSBOM(ctx, opts, env, raw) {
+	if sbom != nil {
+		if err := report.WriteFile(path(sbomFile), sbom); err != nil {
+			return nil, err
+		}
 		written = append(written, sbomFile)
 	}
 	if opts.PDF && writePDF(ctx, opts, env, doc, resultsHash) {
@@ -71,22 +79,27 @@ func writeEvidence(ctx context.Context, opts scanOptions, env Env, doc report.Do
 	if err := report.WriteJSON(path(manifestFile), manifest); err != nil {
 		return nil, err
 	}
-	writeGitHubStepSummary(env, doc.Context.StepSummaryPath, summary)
 	return append(written, manifestFile), nil
 }
 
-// writeSBOM never fails the scan; the SBOM only speeds up later rescans.
-func writeSBOM(ctx context.Context, opts scanOptions, env Env, raw []byte) bool {
+// makeSBOM converts Trivy's report into an SBOM. For an image it is only a
+// shortcut for later rescans, so a failure just warns. A stored directory
+// scan without an SBOM could never be rescanned, so there it is an error,
+// returned before any evidence is written.
+func makeSBOM(ctx context.Context, opts scanOptions, env Env, raw []byte) ([]byte, error) {
+	if !opts.SBOM {
+		return nil, nil
+	}
 	sbom, err := trivy.NewRunner(opts.TrivyBin, opts.Timeout).SBOM(ctx, raw)
-	if err != nil {
-		fmt.Fprintf(env.Stderr, "scanproof: warning: %v; skipping %s\n", err, sbomFile)
-		return false
+	if err == nil {
+		return sbom, nil
 	}
-	if err := report.WriteFile(filepath.Join(opts.OutDir, sbomFile), sbom); err != nil {
-		fmt.Fprintf(env.Stderr, "scanproof: warning: %v; skipping %s\n", err, sbomFile)
-		return false
+	if opts.Dir.Enabled && opts.Store != "" {
+		return nil, fmt.Errorf("the directory's SBOM could not be made, so scanproof rescan could never check it; "+
+			"nothing was written or stored: %w", err)
 	}
-	return true
+	fmt.Fprintf(env.Stderr, "scanproof: warning: %v; skipping %s\n", err, sbomFile)
+	return nil, nil
 }
 
 // writePDF never fails the scan: the JSON and Markdown evidence already exist.
@@ -116,7 +129,8 @@ func uploadEvidence(ctx context.Context, st store.Store, outDir string, doc repo
 	if _, err := store.DigestIndexPrefix(doc.Image.Digest); err == nil && contains(names, sbomFile) {
 		entry := store.IndexEntry{ReportID: doc.ReportID, ScanPrefix: prefix, HasSBOM: true}
 		if err := store.PutIndexEntry(ctx, st, doc.Image.Digest, entry); err != nil {
-			return "", err
+			return "", fmt.Errorf("report %s is stored but not indexed, so rescans will not find it (stored at %s): %w",
+				doc.ReportID, st.Location(prefix), err)
 		}
 	}
 	return st.Location(prefix), nil

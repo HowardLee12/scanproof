@@ -1,4 +1,4 @@
-// ScanProof image scan report.
+// ScanProof scan report for a container image or a directory.
 //
 // Every value comes from data.json, which ScanProof writes next to this file.
 // Values are inserted as plain text and never evaluated as Typst markup, so
@@ -8,7 +8,7 @@
 
 #import "common.typ": *
 
-#set document(title: "Container Image Scan Report " + d.report_id)
+#set document(title: d.title + " " + d.report_id)
 #set page(
   paper: "us-letter",
   margin: (top: 14mm, bottom: 18mm, x: 15mm),
@@ -30,9 +30,9 @@
   columns: (1fr, auto),
   align: (left + bottom, right + bottom),
   {
-    text(size: 16pt, weight: "bold", fill: navy, "Container Image Scan Report")
+    text(size: 16pt, weight: "bold", fill: navy, d.title)
     linebreak()
-    text(size: 8pt, fill: muted, "Vulnerability and secret scan run before deployment")
+    text(size: 8pt, fill: muted, d.subtitle)
   },
   text(size: 7.4pt, fill: muted, {
     [Report ]
@@ -72,8 +72,8 @@
   ),
 )
 
-#section("Image")
-#kv-table(d.image_rows)
+#section(d.artifact_title)
+#kv-table(d.artifact_rows)
 
 #section(d.context_title)
 #kv-table(d.context_rows)
@@ -133,15 +133,35 @@
   )
 }
 
+#if d.not_scanned.len() > 0 or d.secrets_skipped.len() > 0 or d.coverage_caveats.len() > 0 {
+  section("Coverage")
+  for caveat in d.coverage_caveats {
+    note(text(weight: "bold", fill: amber, caveat))
+    linebreak()
+  }
+  if d.not_scanned.len() > 0 {
+    note[Trivy did not read these paths, so they were checked for neither vulnerabilities nor secrets.]
+    data-table((1fr, 14mm, 70mm), ("Not checked", "Files", "Reason"), d.not_scanned, aligns: (left, right, left))
+  }
+  if d.secrets_skipped.len() > 0 {
+    note(d.secrets_skipped_note)
+    data-table((1fr, 50mm), ("Not checked for secrets", "Reason"), d.secrets_skipped)
+  }
+}
+
 #section("Secrets", note: str(d.secrets.len()) + " found")
 #if d.secrets_note != "" {
   note(d.secrets_note)
 } else if d.secrets.len() == 0 {
-  note[No keys, tokens or passwords were found in image files.]
+  note(d.secrets_none)
 }
 #if d.secrets.len() > 0 {
   data-table((38mm, 1fr, 1fr, 30mm), ("Rule", "Title", "Location", "Status"), d.secrets)
   note[The matched text is never stored or printed.]
+}
+#if d.secrets_skips != "" {
+  linebreak()
+  note(d.secrets_skips)
 }
 
 #if d.malware {
@@ -150,17 +170,22 @@
   note(d.malware_stats)
   if d.malware_findings.len() == 0 {
     note[No malware was detected.]
-  } else {
+  } else if d.layer_column {
     data-table((20mm, 1fr, 1fr, 12mm, 28mm), ("Engine", "Signature", "File", "Layer", "Status"), d.malware_findings,
       aligns: (left, left, left, right, left))
+  } else {
+    data-table((20mm, 1fr, 1fr, 28mm), ("Engine", "Signature", "File", "Status"), d.malware_findings)
   }
-  if d.malware_skipped.len() > 0 {
+  if d.malware_skipped.len() > 0 and d.layer_column {
     data-table((1fr, 12mm, 18mm, 60mm), ("Not fully scanned", "Layer", "Size", "Reason"), d.malware_skipped,
       aligns: (left, right, right, left))
+  } else if d.malware_skipped.len() > 0 {
+    data-table((1fr, 18mm, 60mm), ("Not fully scanned", "Size", "Reason"), d.malware_skipped,
+      aligns: (left, right, left))
   }
 }
 
-#section("Approved exceptions", note: str(d.exceptions_applied.len()) + " applied to this image")
+#section("Approved exceptions", note: str(d.exceptions_applied.len()) + " applied to this " + d.subject)
 #if d.exceptions_applied.len() == 0 {
   note[No exceptions were applied.]
 } else {
@@ -173,7 +198,7 @@
 }
 #if d.exceptions_unused.len() > 0 {
   v(2mm)
-  text(weight: "bold", "Active exceptions that matched nothing in this image")
+  text(weight: "bold", "Active exceptions that matched nothing in this " + d.subject)
   data-table((24mm, 34mm, 1fr, 34mm, 18mm), ("ID", "Finding", "Reason", "Approved by", "Expires"), d.exceptions_unused)
 }
 #note[Exceptions are kept in the scanned repository, so the pull request that added each one is its approval record. An expired exception stops applying and the finding counts again.]

@@ -47,6 +47,7 @@ type Coverage struct {
 	ManualScans      int `json:"manual_scans"`
 	Images           int `json:"images"`
 	Repositories     int `json:"repositories"`
+	Directories      int `json:"directories"`
 	Pass             int `json:"pass"`
 	Warn             int `json:"warn"`
 	Fail             int `json:"fail"`
@@ -78,9 +79,11 @@ type ExceptionActivity struct {
 
 // PopulationRow is one scan in the period.
 type PopulationRow struct {
-	ReportID   string `json:"report_id"`
-	ScannedAt  string `json:"scanned_at_utc"`
-	Trigger    string `json:"trigger"`
+	ReportID     string `json:"report_id"`
+	ScannedAt    string `json:"scanned_at_utc"`
+	Trigger      string `json:"trigger"`
+	ArtifactType string `json:"artifact_type"`
+	// Image is the image reference, or dir:NAME[:VERSION] for a directory.
 	Image      string `json:"image"`
 	Digest     string `json:"digest"`
 	Verdict    string `json:"verdict"`
@@ -146,7 +149,7 @@ func Build(in Input) Summary {
 
 func coverage(scans []Loaded, daysSoFar int) Coverage {
 	c := Coverage{Scans: len(scans), DaysInPeriod: daysSoFar}
-	digests, repos, rescanDays := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	digests, repos, dirs, rescanDays := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, s := range scans {
 		switch s.Trigger {
 		case report.TriggerCI:
@@ -176,10 +179,14 @@ func coverage(scans []Loaded, daysSoFar int) Coverage {
 		if key == "" {
 			key = s.Image.Reference
 		}
+		if s.IsDirectory() {
+			dirs[key] = true
+			continue
+		}
 		digests[key] = true
 		repos[imageName(s.Image.Reference)] = true
 	}
-	c.Images, c.Repositories, c.DaysWithRescans = len(digests), len(repos), len(rescanDays)
+	c.Images, c.Repositories, c.Directories, c.DaysWithRescans = len(digests), len(repos), len(dirs), len(rescanDays)
 	return c
 }
 
@@ -267,19 +274,29 @@ func populationRows(scans []Loaded) []PopulationRow {
 	rows := make([]PopulationRow, 0, len(scans))
 	for _, s := range scans {
 		rows = append(rows, PopulationRow{
-			ReportID:   s.ReportID,
-			ScannedAt:  s.GeneratedAt.UTC().Format("2006-01-02 15:04:05 UTC"),
-			Trigger:    s.Trigger,
-			Image:      s.Image.Reference,
-			Digest:     s.Image.Digest,
-			Verdict:    string(s.Verdict),
-			Violations: s.Summary.Violations,
-			Repository: s.Context.Repository,
-			Commit:     s.Context.Commit,
-			Evidence:   s.Location,
+			ReportID:     s.ReportID,
+			ScannedAt:    s.GeneratedAt.UTC().Format("2006-01-02 15:04:05 UTC"),
+			Trigger:      s.Trigger,
+			ArtifactType: artifactTypeOf(s.Document),
+			Image:        s.Image.Reference,
+			Digest:       s.Image.Digest,
+			Verdict:      string(s.Verdict),
+			Violations:   s.Summary.Violations,
+			Repository:   s.Context.Repository,
+			Commit:       s.Context.Commit,
+			Evidence:     s.Location,
 		})
 	}
 	return rows
+}
+
+// artifactTypeOf treats scans stored before directories were supported,
+// which have no artifact type, as images.
+func artifactTypeOf(doc report.Document) string {
+	if doc.ArtifactType == "" {
+		return model.ArtifactContainerImage
+	}
+	return doc.ArtifactType
 }
 
 // remediation returns the row for one severity, or an empty row.

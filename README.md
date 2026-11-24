@@ -1,6 +1,6 @@
 # ScanProof
 
-ScanProof scans a container image in CI and keeps the result as evidence you can hand to an auditor.
+ScanProof scans a container image in CI, or software installed in a directory, and keeps the result as evidence you can hand to an auditor.
 
 It runs [Trivy](https://github.com/aquasecurity/trivy) for vulnerabilities and embedded secrets, and optionally [ClamAV](https://www.clamav.net/) and YARA for malware. It then applies a policy and your approved exceptions, and writes:
 
@@ -8,7 +8,7 @@ It runs [Trivy](https://github.com/aquasecurity/trivy) for vulnerabilities and e
 |---|---|
 | `results.json` | Every finding, the policy result and the CI context, in one machine-readable file |
 | `summary.md` | The GitHub Actions job summary |
-| `report.pdf` | A short report for auditors: verdict, image digest, change, findings, exceptions |
+| `report.pdf` | A short report for auditors: verdict, image digest (or directory and tree digest), change, findings, exceptions |
 | `manifest.json` | SHA-256 of each file, so anyone can check later that nothing was changed |
 
 It can also post the result to Discord or Slack, keep every scan in an S3 bucket, and turn a quarter of stored scans into a **period summary** for auditors: coverage, remediation against your SLA, and the full list of scans to sample from.
@@ -74,6 +74,16 @@ scanproof rescan --store s3://acme-scan-evidence/prod --inventory kubernetes
 
 **[docs/rescan.md](docs/rescan.md)** has a ready-to-apply Kubernetes CronJob and RBAC rules, and the ECS setup.
 
+## Directories
+
+Some software runs from a directory rather than an image, for example a Python virtualenv on a shared filesystem that GPU pods load at startup. Scan each version once on a machine that has it:
+
+```sh
+scanproof scan --dir --name acme-vllm --version 0.9.1 --store s3://acme-scan-evidence/prod /mnt/shared/venvs/vllm
+```
+
+The directory is identified by a tree digest of its names, contents, permissions and symlinks, and the evidence is stored like an image scan. List it in the rescan images file as `dir:acme-vllm:0.9.1@sha256:<tree digest>`, and `scanproof rescan --inventory kubernetes,file` checks its stored SBOM every day without access to the directory. **[docs/directories.md](docs/directories.md)** covers the tree digest algorithm, malware checks, and a Kubernetes Job that scans a directory only GPU nodes mount.
+
 **[docs/storage.md](docs/storage.md)** explains how to set up the bucket: Object Lock retention, least-privilege IAM for CI and for the summary job, GitHub OIDC, S3-compatible services and their settings.
 
 ## Malware
@@ -82,7 +92,7 @@ scanproof rescan --store s3://acme-scan-evidence/prod --inventory kubernetes
 scanproof scan --malware example-api:1.0
 ```
 
-Checks every file in the image with ClamAV, plus YARA when you pass `--yara-rules`. Use the `-full` image, which includes both engines. **[docs/malware.md](docs/malware.md)** covers keeping the signatures current, YARA rules, exceptions, and the limits.
+Checks every file in the image (or the directory, with `--dir`) with ClamAV, plus YARA when you pass `--yara-rules`. Use the `-full` image, which includes both engines. **[docs/malware.md](docs/malware.md)** covers keeping the signatures current, YARA rules, exceptions, and the limits.
 
 ## Policy
 
@@ -151,7 +161,11 @@ Set either or both webhook URLs as secrets:
 
 ```
 scanproof scan [flags] IMAGE
+scanproof scan --dir --name NAME [--version VERSION] [flags] PATH
 
+  --dir                  scan the directory PATH instead of an image
+  --name NAME            with --dir: the name the directory is tracked by (required)
+  --version VERSION      with --dir: the version of the software in it
   --policy FILE          policy file (default: built-in policy)
   --exceptions FILE      exceptions file
   --mode warn|enforce    overrides the policy file
@@ -164,9 +178,9 @@ scanproof scan [flags] IMAGE
   --clamav-db DIR        ClamAV signature directory or file
   --clamav-update        run freshclam before the malware scan
   --malware-max-file-mb  skip larger files, listed in the report (default 512)
-  --platform OS/ARCH     image platform for multi-platform images
+  --platform OS/ARCH     image platform for multi-platform images (not with --dir)
   --notify WHEN          violation | always | never (default violation)
-  --trivy-results FILE   use an existing Trivy JSON report
+  --trivy-results FILE   use an existing Trivy JSON report (not with --dir)
   --trivy PATH           trivy binary (default trivy)
   --typst PATH           typst binary used for the PDF (default typst)
   --timeout DURATION     scan time limit (default 30m)
@@ -175,7 +189,7 @@ scanproof scan [flags] IMAGE
 In GitHub Actions, ScanProof also appends the summary to the job page, adds a warning or error annotation, and sets the step outputs `verdict`, `report-id`, `violations`, `results`, `evidence-dir` and, with a store, `evidence-url`.
 
 ```
-scanproof rescan --store URL --inventory kubernetes|ecs|file [flags]
+scanproof rescan --store URL --inventory kubernetes|ecs|file[,...] [flags]
 ```
 
 See [docs/rescan.md](docs/rescan.md) for the rescan flags.
@@ -196,12 +210,13 @@ The PDF maps the report to SOC 2 criteria CC7.1 and CC8.1 for convenience. Your 
 
 ## Security notes
 
-- Trivy settings files in the scanned repository (`trivy.yaml`, `.trivyignore`) and `TRIVY_*` variables that filter results are ignored. The only way to accept a finding is an exception with a reason and an expiry date. Registry login, cache and database mirror variables are still passed through.
+- Trivy settings files in the working directory, such as the scanned repository (`trivy.yaml`, `.trivyignore`, `trivy-secret.yaml`), and `TRIVY_*` variables that filter results are ignored. Image scans use Trivy's built-in secret rules, whose allow rules skip paths such as tests, examples and system directories (the report lists them); directory scans switch those allow rules off. The only way to accept a finding is an exception with a reason and an expiry date. Registry login, cache and database mirror variables are still passed through.
 - Imported Trivy reports (`--trivy-results`) must come from `trivy image`, and the report says that secret scanning could not be verified.
 - Secret findings record the rule, file and line only. The matched text is never stored or printed.
 - Values from scan results are passed to the PDF template as data, never as template code.
 - The image pins Trivy by digest and verifies the Typst download by SHA-256.
-- The malware scan unpacks every layer's regular files under generated names in a private temporary directory, so names from the image never reach the file system or scanner output. It checks that the scanner covered every file, and deletes the directory after each layer.
+- The malware scan unpacks every layer's regular files under generated names in a private temporary directory, so names from the image never reach the file system or scanner output. It checks that the scanner covered every file, and deletes the directory after each layer. Directory scans copy files the same way, in batches.
+- Directory scans read only through the scanned directory (never following a symlink out of it), stop if the directory changes while it is scanned, and list the files Trivy does not read.
 
 ## Roadmap
 

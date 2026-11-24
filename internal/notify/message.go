@@ -68,7 +68,7 @@ func NewMessage(doc report.Document) Message {
 	violations, more := violationLines(doc.Vulnerabilities)
 	return Message{
 		Verdict:        doc.Verdict,
-		Title:          fmt.Sprintf("ScanProof %s: %s", doc.Verdict, doc.Image.Reference),
+		Title:          fmt.Sprintf("ScanProof %s: %s", doc.Verdict, report.ArtifactLabel(doc)),
 		Summary:        summaryLine(doc),
 		Fields:         fields(doc),
 		Violations:     violations,
@@ -87,7 +87,7 @@ func summaryLine(doc report.Document) string {
 }
 
 func fields(doc report.Document) []Field {
-	out := make([]Field, 0, 5)
+	out := make([]Field, 0, 7)
 	for _, sev := range []model.Severity{model.SeverityCritical, model.SeverityHigh} {
 		c := doc.Summary.Count(sev)
 		out = append(out, Field{Name: sev.String(), Value: fmt.Sprintf("%d (%d fixable)", c.Total, c.Fixable)})
@@ -99,7 +99,29 @@ func fields(doc report.Document) []Field {
 	if doc.Context.Branch != "" {
 		out = append(out, Field{Name: "Branch", Value: doc.Context.Branch})
 	}
-	return out
+	return append(out, directoryFields(doc)...)
+}
+
+// directoryFields identify a scanned directory: where it was scanned and
+// its tree digest, which the rescan inventory lists it by.
+func directoryFields(doc report.Document) []Field {
+	if !doc.IsDirectory() {
+		return nil
+	}
+	out := []Field{}
+	if doc.Directory != nil && doc.Directory.Path != "" {
+		out = append(out, Field{Name: "Path", Value: doc.Directory.Path})
+	}
+	return append(out, Field{Name: "Tree digest", Value: shortDigest(doc.Image.Digest)})
+}
+
+// shortDigest keeps the algorithm and the first 12 hex characters.
+func shortDigest(d string) string {
+	algo, hex, ok := strings.Cut(d, ":")
+	if !ok || len(hex) <= 12 {
+		return d
+	}
+	return algo + ":" + hex[:12] + "…"
 }
 
 func violationLines(findings []policy.VulnerabilityFinding) ([]string, int) {

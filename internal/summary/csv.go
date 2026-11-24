@@ -10,7 +10,7 @@ import (
 
 var populationHeader = []string{
 	"report_id", "scanned_at_utc", "trigger", "image", "digest", "verdict",
-	"violations", "repository", "commit", "evidence",
+	"violations", "repository", "commit", "evidence", "artifact_type",
 }
 
 // PopulationCSV renders one row per scan for audit sampling.
@@ -23,7 +23,7 @@ func PopulationCSV(rows []PopulationRow) ([]byte, error) {
 	for _, r := range rows {
 		record := []string{
 			r.ReportID, r.ScannedAt, r.Trigger, r.Image, r.Digest, r.Verdict,
-			strconv.Itoa(r.Violations), r.Repository, r.Commit, r.Evidence,
+			strconv.Itoa(r.Violations), r.Repository, r.Commit, r.Evidence, r.ArtifactType,
 		}
 		for i, v := range record {
 			record[i] = neutralize(v)

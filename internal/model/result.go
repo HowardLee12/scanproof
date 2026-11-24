@@ -68,10 +68,11 @@ type MalwareEngine struct {
 }
 
 // MalwareDetection is one file one engine flagged. Layer is the 1-based
-// image layer the file came from.
+// image layer the file came from; it is 0 (and left out) for a directory,
+// whose paths are relative to the scanned directory.
 type MalwareDetection struct {
 	Path      string `json:"path"`
-	Layer     int    `json:"layer"`
+	Layer     int    `json:"layer,omitempty"`
 	Engine    string `json:"engine"`
 	Signature string `json:"signature"`
 }
@@ -79,18 +80,22 @@ type MalwareDetection struct {
 // SkippedFile is a file the malware scan did not fully read, and why.
 type SkippedFile struct {
 	Path   string `json:"path"`
-	Layer  int    `json:"layer"`
+	Layer  int    `json:"layer,omitempty"`
 	Bytes  int64  `json:"bytes"`
 	Reason string `json:"reason"`
 }
 
-// MalwareScan is the result of scanning every file of every image layer.
+// MalwareScan is the result of scanning every file of every image layer, or
+// every file of a directory. Image scans set ImageSource, ConfigDigest and
+// Layers; directory scans set TreeDigest, the digest of exactly the bytes
+// the engines read.
 type MalwareScan struct {
 	Engines      []MalwareEngine    `json:"engines"`
-	ImageSource  string             `json:"image_source"`
-	ConfigDigest string             `json:"config_digest"`
+	ImageSource  string             `json:"image_source,omitempty"`
+	ConfigDigest string             `json:"config_digest,omitempty"`
+	TreeDigest   string             `json:"tree_digest,omitempty"`
 	Platform     string             `json:"platform,omitempty"`
-	Layers       int                `json:"layers"`
+	Layers       int                `json:"layers,omitempty"`
 	FilesScanned int                `json:"files_scanned"`
 	BytesScanned int64              `json:"bytes_scanned"`
 	Skipped      []SkippedFile      `json:"skipped"`
@@ -99,8 +104,10 @@ type MalwareScan struct {
 
 // ScanResult is everything one scan found, before any policy is applied.
 type ScanResult struct {
-	ArtifactType    string          `json:"artifact_type,omitempty"`
-	Image           Image           `json:"image"`
+	ArtifactType string `json:"artifact_type,omitempty"`
+	Image        Image  `json:"image"`
+	// Directory is set for directory scans (ArtifactType "directory").
+	Directory       *Directory      `json:"directory,omitempty"`
 	Scanner         Scanner         `json:"scanner"`
 	ScannedAt       time.Time       `json:"scanned_at"`
 	Vulnerabilities []Vulnerability `json:"vulnerabilities"`

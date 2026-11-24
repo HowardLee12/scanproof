@@ -22,19 +22,47 @@ var verdictIcons = map[policy.Verdict]string{
 func Markdown(doc Document) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## %s ScanProof: %s\n\n", verdictIcons[doc.Verdict], doc.Verdict)
-	fmt.Fprintf(&b, "`%s` · %s · %s\n\n", doc.Image.Reference,
+	fmt.Fprintf(&b, "%s · %s · %s\n\n", subjectLine(doc),
 		plural(doc.Summary.Violations, "policy violation", "policy violations"), modeDescription(doc.Policy.Mode))
 
 	writeRules(&b, doc.Policy.Rules)
 	writeSeverityCounts(&b, doc.Summary)
 	writeViolations(&b, doc.Vulnerabilities)
 	writeSecrets(&b, doc.Secrets)
-	writeMalware(&b, doc.Malware)
+	writeImageSecretNote(&b, doc)
+	writeMalware(&b, doc.Malware, doc.IsDirectory())
+	writeNotChecked(&b, coverageOf(doc))
 	writeExceptions(&b, doc.Exceptions)
 
-	fmt.Fprintf(&b, "<sub>Report %s · digest `%s` · scanned %s with %s · policy: %s</sub>\n",
-		doc.ReportID, doc.Image.Digest, formatTime(doc.ScannedAt), scannerDescription(doc), doc.Policy.Source)
+	fmt.Fprintf(&b, "<sub>Report %s · %s %s · scanned %s with %s · policy: %s</sub>\n",
+		doc.ReportID, digestLabel(doc), code(doc.Image.Digest), formatTime(doc.ScannedAt), scannerDescription(doc), doc.Policy.Source)
 	return b.String()
+}
+
+// subjectLine names what was scanned: the image reference, or the
+// directory's name, version and scanned path.
+func subjectLine(doc Document) string {
+	if !doc.IsDirectory() {
+		return code(doc.Image.Reference)
+	}
+	d := directoryOf(doc)
+	line := "Directory " + code(d.Label())
+	if d.Path != "" {
+		line += " · " + code(d.Path)
+	}
+	return line
+}
+
+func digestLabel(doc Document) string {
+	if doc.IsDirectory() {
+		return "tree digest"
+	}
+	return "digest"
+}
+
+// code puts text in an inline code span that it cannot break out of.
+func code(s string) string {
+	return "`" + strings.ReplaceAll(cell(s), "`", "'") + "`"
 }
 
 func writeRules(b *strings.Builder, rules []policy.RuleResult) {
@@ -59,6 +87,14 @@ func writeSeverityCounts(b *strings.Builder, s Summary) {
 		fmt.Fprintf(b, " (%d accepted)", s.SecretsAccepted)
 	}
 	b.WriteString("\n\n")
+}
+
+// writeImageSecretNote says which files an image's secret scan skipped;
+// directory scans list them instead (see writeNotChecked).
+func writeImageSecretNote(b *strings.Builder, doc Document) {
+	if note := imageSecretNote(doc); note != "" {
+		fmt.Fprintf(b, "<sub>%s</sub>\n\n", note)
+	}
 }
 
 func writeViolations(b *strings.Builder, findings []policy.VulnerabilityFinding) {
@@ -96,7 +132,7 @@ func writeSecrets(b *strings.Builder, secrets []policy.SecretFinding) {
 	b.WriteString("\n")
 }
 
-func writeMalware(b *strings.Builder, m *MalwareSection) {
+func writeMalware(b *strings.Builder, m *MalwareSection, directory bool) {
 	if m == nil {
 		return
 	}
@@ -104,20 +140,38 @@ func writeMalware(b *strings.Builder, m *MalwareSection) {
 	for _, e := range m.Engines {
 		engines = append(engines, engineLabel(e))
 	}
-	fmt.Fprintf(b, "### Malware\n\nScanned %d files (%s) in %s with %s. %s.\n\n", m.FilesScanned, formatBytes(m.BytesScanned),
-		plural(m.Layers, "layer", "layers"), strings.Join(engines, " and "), plural(len(m.Findings), "detection", "detections"))
-	if len(m.Findings) > 0 {
-		b.WriteString("| Engine | Signature | File | Layer | Status |\n|---|---|---|---:|---|\n")
-		for _, f := range m.Findings {
-			fmt.Fprintf(b, "| %s | %s | %s | %d | %s |\n", cell(f.Engine), cell(f.Signature), cell(f.Path), f.Layer,
-				findingStatus(f.ExceptionID, f.Violation))
-		}
-		b.WriteString("\n")
+	where := "in " + plural(m.Layers, "layer", "layers")
+	if directory {
+		where = "of the directory"
 	}
+	fmt.Fprintf(b, "### Malware\n\nScanned %d files (%s) %s with %s. %s.\n\n", m.FilesScanned, formatBytes(m.BytesScanned),
+		where, strings.Join(engines, " and "), plural(len(m.Findings), "detection", "detections"))
+	writeMalwareFindings(b, m.Findings, directory)
 	if len(m.Skipped) > 0 {
 		fmt.Fprintf(b, "%s not fully scanned (size limit or a ClamAV limit); see results.json.\n\n",
 			plural(len(m.Skipped), "file was", "files were"))
 	}
+}
+
+// writeMalwareFindings lists detections; directories have no layer column.
+func writeMalwareFindings(b *strings.Builder, findings []policy.MalwareFinding, directory bool) {
+	if len(findings) == 0 {
+		return
+	}
+	if directory {
+		b.WriteString("| Engine | Signature | File | Status |\n|---|---|---|---|\n")
+	} else {
+		b.WriteString("| Engine | Signature | File | Layer | Status |\n|---|---|---|---:|---|\n")
+	}
+	for _, f := range findings {
+		layer := ""
+		if !directory {
+			layer = fmt.Sprintf(" %d |", f.Layer)
+		}
+		fmt.Fprintf(b, "| %s | %s | %s |%s %s |\n", cell(f.Engine), cell(f.Signature), cell(f.Path), layer,
+			findingStatus(f.ExceptionID, f.Violation))
+	}
+	b.WriteString("\n")
 }
 
 func engineLabel(e model.MalwareEngine) string {
@@ -129,6 +183,35 @@ func engineLabel(e model.MalwareEngine) string {
 		label += fmt.Sprintf(" (%s)", e.Database)
 	}
 	return label
+}
+
+// maxMarkdownPaths bounds the paths listed in the job summary.
+const maxMarkdownPaths = 10
+
+// writeNotChecked says which files of a directory Trivy did not read.
+func writeNotChecked(b *strings.Builder, c *model.Coverage) {
+	if c == nil {
+		return
+	}
+	b.WriteString("### Not checked\n\n")
+	if n := c.NotScanned.Files; n > 0 {
+		paths := []string{}
+		for i, p := range c.NotScanned.Paths {
+			if i == maxMarkdownPaths {
+				break
+			}
+			paths = append(paths, fmt.Sprintf("%s (%s, %s)", code(p.Path), plural(p.Files, "file", "files"), cell(p.Reason)))
+		}
+		fmt.Fprintf(b, "%s not checked for vulnerabilities or secrets: %s.\n\n",
+			plural(n, "file was", "files were"), strings.Join(paths, ", "))
+	}
+	if n := c.SecretsNotChecked.Files; n > 0 {
+		fmt.Fprintf(b, "%s not checked for secrets: %s. results.json lists them.\n\n",
+			plural(n, "file was", "files were"), cell(byReason(c.SecretsNotChecked.ByReason)))
+	}
+	for _, caveat := range c.Caveats {
+		fmt.Fprintf(b, "⚠️ %s\n\n", cell(caveat))
+	}
 }
 
 func writeExceptions(b *strings.Builder, e Exceptions) {

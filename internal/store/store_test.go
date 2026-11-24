@@ -145,15 +145,18 @@ func TestSBOMEntriesNewestFirstAndValidated(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := SBOMEntries(ctx, s, digest)
+	got, unusable, err := SBOMEntries(ctx, s, digest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[0].ReportID != newer.ReportID || got[1].ReportID != older.ReportID {
 		t.Fatalf("got %+v", got)
 	}
-	if got, err := SBOMEntries(ctx, s, "sha256:"+strings.Repeat("a", 64)); err != nil || len(got) != 0 {
-		t.Fatalf("an unknown digest has no entries: %v %v", got, err)
+	if unusable != 2 {
+		t.Errorf("the forged entry and the one without an SBOM cannot be used: %d", unusable)
+	}
+	if got, unusable, err := SBOMEntries(ctx, s, "sha256:"+strings.Repeat("a", 64)); err != nil || len(got) != 0 || unusable != 0 {
+		t.Fatalf("an unknown digest has no entries: %v %d %v", got, unusable, err)
 	}
 }
 
@@ -163,7 +166,7 @@ func TestIndexErrors(t *testing.T) {
 	if err := PutIndexEntry(ctx, s, "not-a-digest", IndexEntry{ReportID: "SR-1"}); err == nil {
 		t.Error("an invalid digest must be rejected")
 	}
-	if _, err := SBOMEntries(ctx, s, "latest"); err == nil {
+	if _, _, err := SBOMEntries(ctx, s, "latest"); err == nil {
 		t.Error("an invalid digest must be rejected")
 	}
 	digest := "sha256:" + strings.Repeat("b", 64)
@@ -171,7 +174,29 @@ func TestIndexErrors(t *testing.T) {
 	if err := s.Put(ctx, prefix+"SR-9.json", []byte("{broken"), "application/json"); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := SBOMEntries(ctx, s, digest); err != nil || len(got) != 0 {
-		t.Errorf("a corrupt index entry is skipped: %v %v", got, err)
+	if got, unusable, err := SBOMEntries(ctx, s, digest); err != nil || len(got) != 0 || unusable != 1 {
+		t.Errorf("a corrupt index entry is skipped and counted: %v %d %v", got, unusable, err)
+	}
+}
+
+// folderStore lists an S3 "folder marker" key along with a real entry.
+type folderStore struct{ *FileStore }
+
+func (f folderStore) List(ctx context.Context, prefix string) ([]string, error) {
+	keys, err := f.FileStore.List(ctx, prefix)
+	return append([]string{prefix}, keys...), err
+}
+
+func TestSBOMEntriesIgnoresFolderMarkers(t *testing.T) {
+	ctx := context.Background()
+	s := folderStore{&FileStore{root: t.TempDir()}}
+	digest := "sha256:" + strings.Repeat("c", 64)
+	e := IndexEntry{ReportID: "SR-20261124-BBBBBB", ScanPrefix: "scans/2026/11/24/SR-20261124-BBBBBB/", HasSBOM: true}
+	if err := PutIndexEntry(ctx, s, digest, e); err != nil {
+		t.Fatal(err)
+	}
+	got, unusable, err := SBOMEntries(ctx, s, digest)
+	if err != nil || len(got) != 1 || unusable != 0 {
+		t.Fatalf("a folder marker is not an index entry: %v %d %v", got, unusable, err)
 	}
 }
