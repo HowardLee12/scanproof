@@ -8,11 +8,14 @@ import (
 )
 
 // allowRuleIDs are the built-in secret allow rules of Trivy 0.76.2. Each
-// skips matching paths: tests, examples, vendor directories, system
-// directories (usr/share, usr/include, usr/lib), locale directories,
-// Markdown files, and the language directories of Node, Go, Python, Ruby
-// and WordPress images. Trivy accepts unknown IDs silently, so the CI
-// image job checks that these really switch the rules off.
+// skips paths that match it: tests (test at the start of the path or after
+// /, -, _ or ., any case), examples (example, case-sensitive), vendor
+// (/vendor/, so not a top-level vendor), usr-dirs (usr/share, usr/include,
+// usr/lib), locale-dir (/locale/), markdown (.md), node.js (opt/yarn-v*),
+// golang (usr/local/go), python (usr/local/lib/python*), rubygems
+// (usr/lib/gems) and wordpress (usr/src/wordpress). Trivy accepts unknown
+// IDs silently, so the CI image job plants a secret in a path that only
+// each rule would hide and checks that it is reported.
 var allowRuleIDs = []string{
 	"tests", "examples", "vendor", "usr-dirs", "locale-dir", "markdown",
 	"node.js", "golang", "python", "rubygems", "wordpress",
@@ -34,9 +37,12 @@ func noAllowRulesConfig(dir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("write trivy secret config: %w", err)
 	}
-	defer f.Close()
 	content := "disable-allow-rules:\n  - " + strings.Join(allowRuleIDs, "\n  - ") + "\n"
-	if _, err := f.WriteString(content); err != nil {
+	_, err = f.WriteString(content)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
 		return "", fmt.Errorf("write trivy secret config: %w", err)
 	}
 	return f.Name(), nil
