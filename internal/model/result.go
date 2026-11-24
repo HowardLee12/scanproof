@@ -59,6 +59,37 @@ type Scanner struct {
 // ArtifactContainerImage is the artifact type of a container image scan.
 const ArtifactContainerImage = "container_image"
 
+// MalwareEngine records one malware scanner and its signature data.
+type MalwareEngine struct {
+	Name         string `json:"name"`
+	Version      string `json:"version"`
+	Database     string `json:"database,omitempty"`
+	DatabaseDate string `json:"database_date,omitempty"`
+}
+
+// MalwareDetection is one file one engine flagged.
+type MalwareDetection struct {
+	Path      string `json:"path"`
+	Engine    string `json:"engine"`
+	Signature string `json:"signature"`
+}
+
+// SkippedFile is a file the malware scan did not read, and why.
+type SkippedFile struct {
+	Path   string `json:"path"`
+	Bytes  int64  `json:"bytes"`
+	Reason string `json:"reason"`
+}
+
+// MalwareScan is the result of scanning the image's files for malware.
+type MalwareScan struct {
+	Engines      []MalwareEngine    `json:"engines"`
+	FilesScanned int                `json:"files_scanned"`
+	BytesScanned int64              `json:"bytes_scanned"`
+	Skipped      []SkippedFile      `json:"skipped"`
+	Detections   []MalwareDetection `json:"detections"`
+}
+
 // ScanResult is everything one scan found, before any policy is applied.
 type ScanResult struct {
 	ArtifactType    string          `json:"artifact_type,omitempty"`
@@ -67,4 +98,6 @@ type ScanResult struct {
 	ScannedAt       time.Time       `json:"scanned_at"`
 	Vulnerabilities []Vulnerability `json:"vulnerabilities"`
 	Secrets         []Secret        `json:"secrets"`
+	// Malware is nil when no malware scan ran.
+	Malware *MalwareScan `json:"malware,omitempty"`
 }

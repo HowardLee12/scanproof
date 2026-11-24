@@ -32,10 +32,23 @@ RUN set -eu; \
     tar -xJf /tmp/typst.tar.xz -C /tmp; \
     install -m 0755 "/tmp/typst-${arch}-unknown-linux-musl/typst" /usr/local/bin/typst
 
-FROM ${TRIVY_IMAGE}
+FROM ${TRIVY_IMAGE} AS base
 # DejaVu Sans is the report's body font; DejaVu Sans Mono ships with Typst.
 RUN apk add --no-cache font-dejavu
 COPY --from=typst /usr/local/bin/typst /usr/local/bin/typst
 COPY --from=build /out/scanproof /usr/local/bin/scanproof
 ENTRYPOINT ["scanproof"]
 CMD ["--help"]
+
+# The "full" image adds ClamAV and YARA for --malware. CLAMAV_DB=download
+# bakes the current ClamAV signatures into the image (release builds);
+# CLAMAV_DB=none leaves them out (CI, or when you mount your own).
+FROM base AS full
+ARG CLAMAV_DB=download
+RUN apk add --no-cache clamav clamav-libunrar yara \
+ && mkdir -p /var/lib/clamav \
+ && chown -R clamav:clamav /var/lib/clamav \
+ && if [ "$CLAMAV_DB" = "download" ]; then freshclam --stdout --no-warnings; fi
+
+# The default image: Trivy, Typst and ScanProof, without malware engines.
+FROM base AS default

@@ -15,9 +15,10 @@ func Markdown(s Summary) string {
 	c := s.Coverage
 	fmt.Fprintf(&b, "## ScanProof period summary: %s to %s\n\n", s.Period.From, s.Period.To)
 	fmt.Fprintf(&b, "%d scans (%d CI, %d rescans, %d manual) of %d images in %d repositories. "+
-		"Rescans ran on %d of %d days. Verdicts: %d pass, %d warn, %d fail.\n\n",
+		"Rescans ran on %d of %d days. Verdicts: %d pass, %d warn, %d fail. "+
+		"Malware checks: %d scans, %d detections.\n\n",
 		c.Scans, c.CIScans, c.RescanScans, c.ManualScans, c.Images, c.Repositories,
-		c.DaysWithRescans, c.DaysInPeriod, c.Pass, c.Warn, c.Fail)
+		c.DaysWithRescans, c.DaysInPeriod, c.Pass, c.Warn, c.Fail, c.MalwareScans, c.MalwareFound)
 
 	b.WriteString("| Severity | SLA days | Opened | Fixed | Fixed in SLA | Median days to fix | Accepted or no fix | Open in SLA | Open overdue |\n")
 	b.WriteString("|---|---:|---:|---:|---:|---:|---:|---:|---:|\n")

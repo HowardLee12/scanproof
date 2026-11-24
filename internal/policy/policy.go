@@ -47,6 +47,8 @@ type Policy struct {
 	FixableOnly bool
 	// BlockSecrets makes every embedded secret a violation.
 	BlockSecrets bool
+	// BlockMalware makes every malware detection a violation.
+	BlockMalware bool
 	// SLA is the number of days to fix a vulnerability once a fix exists.
 	// Zero means no deadline. Period summaries measure remediation with it.
 	SLADays SLADays
@@ -83,6 +85,7 @@ func Default() Policy {
 		MinSeverity:  model.SeverityCritical,
 		FixableOnly:  true,
 		BlockSecrets: true,
+		BlockMalware: true,
 		SLADays:      SLADays{Critical: 15, High: 30, Medium: 90},
 	}
 }
@@ -99,6 +102,7 @@ type rawPolicy struct {
 		Severity    *string `yaml:"severity"`
 		FixableOnly *bool   `yaml:"fixable_only"`
 		Secrets     *bool   `yaml:"secrets"`
+		Malware     *bool   `yaml:"malware"`
 	} `yaml:"fail_on"`
 	SLADays struct {
 		Critical *int `yaml:"critical"`
@@ -138,6 +142,9 @@ func Parse(data []byte) (Policy, error) {
 	}
 	if raw.FailOn.Secrets != nil {
 		p.BlockSecrets = *raw.FailOn.Secrets
+	}
+	if raw.FailOn.Malware != nil {
+		p.BlockMalware = *raw.FailOn.Malware
 	}
 	for _, f := range []struct {
 		name string

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/HowardLee12/scanproof/internal/exception"
+	"github.com/HowardLee12/scanproof/internal/model"
 	"github.com/HowardLee12/scanproof/internal/policy"
 )
 
@@ -28,6 +29,7 @@ func Markdown(doc Document) string {
 	writeSeverityCounts(&b, doc.Summary)
 	writeViolations(&b, doc.Vulnerabilities)
 	writeSecrets(&b, doc.Secrets)
+	writeMalware(&b, doc.Malware)
 	writeExceptions(&b, doc.Exceptions)
 
 	fmt.Fprintf(&b, "<sub>Report %s · digest `%s` · scanned %s with %s · policy: %s</sub>\n",
@@ -92,6 +94,40 @@ func writeSecrets(b *strings.Builder, secrets []policy.SecretFinding) {
 			cell(fmt.Sprintf("%s:%d", s.Target, s.Line)), findingStatus(s.ExceptionID, s.Violation))
 	}
 	b.WriteString("\n")
+}
+
+func writeMalware(b *strings.Builder, m *MalwareSection) {
+	if m == nil {
+		return
+	}
+	engines := make([]string, 0, len(m.Engines))
+	for _, e := range m.Engines {
+		engines = append(engines, engineLabel(e))
+	}
+	fmt.Fprintf(b, "### Malware\n\nScanned %d files (%s) with %s. %s.\n\n", m.FilesScanned, formatBytes(m.BytesScanned),
+		strings.Join(engines, " and "), plural(len(m.Findings), "detection", "detections"))
+	if len(m.Findings) > 0 {
+		b.WriteString("| Engine | Signature | File | Status |\n|---|---|---|---|\n")
+		for _, f := range m.Findings {
+			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", cell(f.Engine), cell(f.Signature), cell(f.Path), findingStatus(f.ExceptionID, f.Violation))
+		}
+		b.WriteString("\n")
+	}
+	if len(m.Skipped) > 0 {
+		fmt.Fprintf(b, "%s not scanned because of the size limit or a write error; see results.json.\n\n",
+			plural(len(m.Skipped), "file was", "files were"))
+	}
+}
+
+func engineLabel(e model.MalwareEngine) string {
+	label := e.Name + " " + e.Version
+	switch {
+	case e.Database != "" && e.DatabaseDate != "":
+		label += fmt.Sprintf(" (%s, %s)", e.Database, e.DatabaseDate)
+	case e.Database != "":
+		label += fmt.Sprintf(" (%s)", e.Database)
+	}
+	return label
 }
 
 func writeExceptions(b *strings.Builder, e Exceptions) {

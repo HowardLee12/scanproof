@@ -17,8 +17,12 @@ func announce(env Env, doc report.Document, outDir, location string) {
 	if location != "" {
 		where = location
 	}
-	line := fmt.Sprintf("ScanProof %s: %s · %d policy violations · %s mode · report %s · evidence in %s",
-		doc.Verdict, doc.Image.Reference, doc.Summary.Violations, doc.Policy.Mode, doc.ReportID, where)
+	violations := fmt.Sprintf("%d policy violations", doc.Summary.Violations)
+	if doc.Summary.Violations == 1 {
+		violations = "1 policy violation"
+	}
+	line := fmt.Sprintf("ScanProof %s: %s · %s · %s mode · report %s · evidence in %s",
+		doc.Verdict, doc.Image.Reference, violations, doc.Policy.Mode, doc.ReportID, where)
 	fmt.Fprintln(env.Stdout, line)
 
 	if env.Getenv("GITHUB_ACTIONS") != "true" {

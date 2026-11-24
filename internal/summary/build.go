@@ -51,6 +51,8 @@ type Coverage struct {
 	Warn             int `json:"warn"`
 	Fail             int `json:"fail"`
 	ScansWithSecrets int `json:"scans_with_secrets"`
+	MalwareScans     int `json:"malware_scans"`
+	MalwareFound     int `json:"malware_detections"`
 	DaysInPeriod     int `json:"days_in_period"`
 	DaysWithRescans  int `json:"days_with_rescans"`
 }
@@ -165,6 +167,10 @@ func coverage(scans []Loaded, daysSoFar int) Coverage {
 		}
 		if len(s.Secrets) > 0 {
 			c.ScansWithSecrets++
+		}
+		if s.Malware != nil {
+			c.MalwareScans++
+			c.MalwareFound += len(s.Malware.Findings)
 		}
 		key := s.Image.Digest
 		if key == "" {

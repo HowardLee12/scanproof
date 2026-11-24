@@ -11,6 +11,8 @@ fail_on:
   fixable_only: true
   # Count every embedded secret (keys, tokens, passwords) as a violation.
   secrets: true
+  # Count every malware detection as a violation (when --malware is used).
+  malware: true
 
 # Days to fix a vulnerability after it is first found with a fix available.
 # Period summaries report remediation against these deadlines. 0 = no deadline.

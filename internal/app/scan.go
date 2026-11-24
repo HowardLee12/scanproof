@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/HowardLee12/scanproof/internal/cicontext"
 	"github.com/HowardLee12/scanproof/internal/exception"
+	"github.com/HowardLee12/scanproof/internal/malware"
 	"github.com/HowardLee12/scanproof/internal/model"
 	"github.com/HowardLee12/scanproof/internal/notify"
 	"github.com/HowardLee12/scanproof/internal/policy"
@@ -50,6 +53,11 @@ func runScan(ctx context.Context, args []string, env Env) int {
 	scan, err := scanImage(ctx, opts)
 	if err != nil {
 		return fail(env, err)
+	}
+	if opts.Malware.Enabled {
+		if scan.Result.Malware, err = scanMalware(ctx, opts, env); err != nil {
+			return fail(env, err)
+		}
 	}
 	ci := cicontext.FromEnv(env.Getenv)
 	trigger := report.TriggerManual
@@ -95,6 +103,46 @@ func scanImage(ctx context.Context, opts scanOptions) (trivy.Scan, error) {
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout+time.Minute)
 	defer cancel()
 	return trivy.NewRunner(opts.TrivyBin, opts.Timeout).Scan(ctx, opts.Image)
+}
+
+// scanMalware unpacks the image and runs ClamAV (and YARA when rules are
+// given) on every file.
+func scanMalware(ctx context.Context, opts scanOptions, env Env) (*model.MalwareScan, error) {
+	m := opts.Malware
+	if m.Update {
+		updateSignatures(ctx, m, env)
+	}
+	scanner := malware.Scanner{
+		ClamAV:       malware.NewClamAV(m.ClamscanBin, m.ClamAVDB),
+		MaxFileBytes: m.MaxFileMB << 20,
+		TryDaemon:    m.DockerDaemon,
+		WorkDir:      m.WorkDir,
+	}
+	if m.YaraRules != "" {
+		y := malware.NewYara(m.YaraBin, m.YaraRules)
+		scanner.Yara = &y
+	}
+	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
+	defer cancel()
+	result, err := scanner.Scan(ctx, opts.Image)
+	if err != nil {
+		return nil, fmt.Errorf("malware scan: %w", err)
+	}
+	return result, nil
+}
+
+// updateSignatures runs freshclam. A failed update only warns: the report
+// records the signature version that was actually used.
+func updateSignatures(ctx context.Context, m malwareOptions, env Env) {
+	args := []string{"--stdout", "--no-warnings"}
+	if m.ClamAVDB != "" {
+		args = append(args, "--datadir="+m.ClamAVDB)
+	}
+	cmd := exec.CommandContext(ctx, m.FreshclamBin, args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(env.Stderr, "scanproof: warning: freshclam failed, using the existing signatures: %v: %s\n",
+			err, strings.TrimSpace(string(out)))
+	}
 }
 
 func importResults(path string) (trivy.Scan, error) {

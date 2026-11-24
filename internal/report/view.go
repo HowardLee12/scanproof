@@ -42,6 +42,11 @@ type pdfView struct {
 	ExceptionsUnused  [][]string `json:"exceptions_unused"`
 	IntegrityRows     []pdfRow   `json:"integrity_rows"`
 	SecretsNote       string     `json:"secrets_note"`
+	Malware           bool       `json:"malware"`
+	MalwareEngines    [][]string `json:"malware_engines"`
+	MalwareStats      string     `json:"malware_stats"`
+	MalwareFindings   [][]string `json:"malware_findings"`
+	MalwareSkipped    [][]string `json:"malware_skipped"`
 }
 
 type pdfRow struct {
@@ -113,6 +118,11 @@ func newPDFView(doc Document, resultsSHA256 string) pdfView {
 		ExceptionsUnused:  exceptionRows(doc.Exceptions.Unused),
 		IntegrityRows:     integrityRows(doc, resultsSHA256),
 		SecretsNote:       secretsNote(doc),
+		Malware:           doc.Malware != nil,
+		MalwareEngines:    malwareEngines(doc.Malware),
+		MalwareStats:      malwareStats(doc.Malware),
+		MalwareFindings:   malwareFindings(doc.Malware),
+		MalwareSkipped:    malwareSkipped(doc.Malware),
 	}
 }
 
@@ -243,8 +253,16 @@ func tiles(doc Document) []pdfTile {
 	if doc.Summary.SecretsAccepted > 0 {
 		secretHint = fmt.Sprintf("%d accepted", doc.Summary.SecretsAccepted)
 	}
+	out = append(out, pdfTile{Label: "Secrets", Value: strconv.Itoa(doc.Summary.Secrets), Hint: secretHint, Accent: "#6b7785"})
+	if doc.Malware != nil {
+		accent := "#137a3f"
+		if doc.Summary.MalwareDetections > 0 {
+			accent = "#b42318"
+		}
+		out = append(out, pdfTile{Label: "Malware", Value: strconv.Itoa(doc.Summary.MalwareDetections),
+			Hint: fmt.Sprintf("%d files", doc.Malware.FilesScanned), Accent: accent})
+	}
 	out = append(out,
-		pdfTile{Label: "Secrets", Value: strconv.Itoa(doc.Summary.Secrets), Hint: secretHint, Accent: "#6b7785"},
 		pdfTile{Label: "Violations", Value: strconv.Itoa(doc.Summary.Violations), Hint: string(doc.Policy.Mode) + " mode", Accent: verdictAccents[doc.Verdict]},
 	)
 	return out
@@ -389,4 +407,66 @@ func orText(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// maxSkippedRows bounds the skipped-files table; results.json lists all.
+const maxSkippedRows = 20
+
+func malwareEngines(m *MalwareSection) [][]string {
+	if m == nil {
+		return [][]string{}
+	}
+	rows := make([][]string, 0, len(m.Engines))
+	for _, e := range m.Engines {
+		rows = append(rows, []string{e.Name, e.Version, orText(shortHashes(e.Database), "—"), orText(e.DatabaseDate, "—")})
+	}
+	return rows
+}
+
+func malwareStats(m *MalwareSection) string {
+	if m == nil {
+		return ""
+	}
+	stats := fmt.Sprintf("Scanned %d files (%s) from the flattened image filesystem.", m.FilesScanned, formatBytes(m.BytesScanned))
+	if len(m.Skipped) > 0 {
+		stats += fmt.Sprintf(" %s not scanned and %s listed below.", plural(len(m.Skipped), "file was", "files were"),
+			map[bool]string{true: "is", false: "are"}[len(m.Skipped) == 1])
+	}
+	return stats
+}
+
+func malwareFindings(m *MalwareSection) [][]string {
+	if m == nil {
+		return [][]string{}
+	}
+	rows := make([][]string, 0, len(m.Findings))
+	for _, f := range m.Findings {
+		rows = append(rows, []string{f.Engine, f.Signature, f.Path, findingStatus(f.ExceptionID, f.Violation)})
+	}
+	return rows
+}
+
+func malwareSkipped(m *MalwareSection) [][]string {
+	if m == nil {
+		return [][]string{}
+	}
+	rows := make([][]string, 0, maxSkippedRows)
+	for i, f := range m.Skipped {
+		if i == maxSkippedRows {
+			rows = append(rows, []string{fmt.Sprintf("%d more in results.json", len(m.Skipped)-maxSkippedRows), "", ""})
+			break
+		}
+		rows = append(rows, []string{f.Path, formatBytes(f.Bytes), f.Reason})
+	}
+	return rows
+}
+
+// shortHashes shortens "sha256:<64 hex>" inside text to 12 hex characters so
+// it fits a table cell; results.json keeps the full value.
+func shortHashes(s string) string {
+	before, hash, ok := strings.Cut(s, "sha256:")
+	if !ok || len(hash) <= 12 {
+		return s
+	}
+	return before + "sha256:" + hash[:12] + "…"
 }

@@ -163,3 +163,41 @@ func TestEvaluateDoesNotModifyInput(t *testing.T) {
 		t.Fatal("Evaluate must not mutate the scan result")
 	}
 }
+
+func TestMalwareDetectionsAreViolationsUnlessAccepted(t *testing.T) {
+	res := model.ScanResult{Malware: &model.MalwareScan{Detections: []model.MalwareDetection{
+		{Path: "/app/tests/eicar.com", Engine: "ClamAV", Signature: "Eicar-Test-Signature"},
+		{Path: "/usr/bin/kworker", Engine: "YARA", Signature: "Linux_Miner"},
+	}}}
+	excs := mustExceptions(t, "exceptions:\n  - {id: EX-M, finding: Eicar-Test-Signature, path: app/tests/eicar.com, reason: r, expires: 2027-01-31}\n")
+	ev := Evaluate(res, Default(), excs, now)
+	if ev.Verdict != VerdictWarn || len(ev.Malware) != 2 {
+		t.Fatalf("verdict %s, %d findings", ev.Verdict, len(ev.Malware))
+	}
+	if ev.Malware[0].ExceptionID != "EX-M" || ev.Malware[0].Violation || !ev.Malware[1].Violation {
+		t.Errorf("findings = %+v", ev.Malware)
+	}
+	rule := ev.Rules[len(ev.Rules)-1]
+	if rule.Name != "No malware detections" || rule.Found != 1 || rule.Passed {
+		t.Errorf("rule = %+v", rule)
+	}
+}
+
+func TestNoMalwareRuleWithoutAMalwareScan(t *testing.T) {
+	for _, r := range Evaluate(model.ScanResult{}, Default(), nil, now).Rules {
+		if r.Name == "No malware detections" {
+			t.Fatal("the malware rule only applies when a malware scan ran")
+		}
+	}
+}
+
+func TestMalwareCanBeReportOnly(t *testing.T) {
+	p, err := Parse([]byte("fail_on:\n  malware: false\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := model.ScanResult{Malware: &model.MalwareScan{Detections: []model.MalwareDetection{{Path: "/x", Signature: "S"}}}}
+	if ev := Evaluate(res, p, nil, now); ev.Verdict != VerdictPass || ev.Malware[0].Violation {
+		t.Fatalf("with malware: false a detection is reported but not a violation: %+v", ev)
+	}
+}
