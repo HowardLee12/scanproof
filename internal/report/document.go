@@ -49,13 +49,16 @@ type Summary struct {
 	Violations        int             `json:"violations"`
 }
 
-// MalwareSection is the malware scan, after exceptions and rules.
+// MalwareSection is the malware scan, after exceptions and rules. Image
+// scans set ImageSource, ConfigDigest and Layers; directory scans set
+// TreeDigest.
 type MalwareSection struct {
 	Engines      []model.MalwareEngine   `json:"engines"`
-	ImageSource  string                  `json:"image_source"`
-	ConfigDigest string                  `json:"config_digest"`
+	ImageSource  string                  `json:"image_source,omitempty"`
+	ConfigDigest string                  `json:"config_digest,omitempty"`
+	TreeDigest   string                  `json:"tree_digest,omitempty"`
 	Platform     string                  `json:"platform,omitempty"`
-	Layers       int                     `json:"layers"`
+	Layers       int                     `json:"layers,omitempty"`
 	FilesScanned int                     `json:"files_scanned"`
 	BytesScanned int64                   `json:"bytes_scanned"`
 	Skipped      []model.SkippedFile     `json:"skipped"`
@@ -81,6 +84,11 @@ type Exceptions struct {
 }
 
 // Document is the content of results.json and the source of every other output.
+//
+// ArtifactType is "container_image" or "directory" (results.json files
+// written before directories were supported have none, and are images). For
+// a directory, Image.Reference is dir:NAME[:VERSION] and Image.Digest is the
+// tree digest, so tools that only read "image" still group and index it.
 type Document struct {
 	Schema          string                        `json:"schema"`
 	ReportID        string                        `json:"report_id"`
@@ -88,7 +96,9 @@ type Document struct {
 	Tool            Tool                          `json:"tool"`
 	Trigger         string                        `json:"trigger"`
 	Verdict         policy.Verdict                `json:"verdict"`
+	ArtifactType    string                        `json:"artifact_type,omitempty"`
 	Image           model.Image                   `json:"image"`
+	Directory       *model.Directory              `json:"directory,omitempty"`
 	Scanner         model.Scanner                 `json:"scanner"`
 	ScannedAt       time.Time                     `json:"scanned_at"`
 	Context         cicontext.Context             `json:"context"`
@@ -101,9 +111,9 @@ type Document struct {
 	Exceptions      Exceptions                    `json:"exceptions"`
 }
 
-// Runtime describes a rescan of a running image.
+// Runtime describes a rescan of a running image or a deployed directory.
 type Runtime struct {
-	// Locations are where the image runs, e.g. "k8s gpu/vllm-0".
+	// Locations are where it runs, e.g. "k8s gpu/vllm-0".
 	Locations []string `json:"locations"`
 	// Method is "sbom" when the stored SBOM was checked again, or "image"
 	// when the image itself was pulled and scanned.
@@ -137,17 +147,19 @@ type Input struct {
 func Build(in Input) Document {
 	ev := in.Evaluation
 	return Document{
-		Schema:      SchemaVersion,
-		ReportID:    in.ReportID,
-		GeneratedAt: in.GeneratedAt.UTC(),
-		Tool:        in.Tool,
-		Trigger:     in.Trigger,
-		Verdict:     ev.Verdict,
-		Image:       in.Result.Image,
-		Scanner:     in.Result.Scanner,
-		ScannedAt:   in.Result.ScannedAt,
-		Context:     in.Context,
-		Runtime:     in.Runtime,
+		Schema:       SchemaVersion,
+		ReportID:     in.ReportID,
+		GeneratedAt:  in.GeneratedAt.UTC(),
+		Tool:         in.Tool,
+		Trigger:      in.Trigger,
+		Verdict:      ev.Verdict,
+		ArtifactType: artifactType(in.Result),
+		Image:        in.Result.Image,
+		Directory:    in.Result.Directory,
+		Scanner:      in.Result.Scanner,
+		ScannedAt:    in.Result.ScannedAt,
+		Context:      in.Context,
+		Runtime:      in.Runtime,
 		Policy: PolicyInfo{
 			Mode:         in.Policy.Mode,
 			Source:       in.PolicySource.Label(),
@@ -238,6 +250,7 @@ func malwareSection(scan *model.MalwareScan, findings []policy.MalwareFinding) *
 		Engines:      orEmpty(scan.Engines),
 		ImageSource:  scan.ImageSource,
 		ConfigDigest: scan.ConfigDigest,
+		TreeDigest:   scan.TreeDigest,
 		Platform:     scan.Platform,
 		Layers:       scan.Layers,
 		FilesScanned: scan.FilesScanned,

@@ -22,8 +22,12 @@ func announce(env Env, doc report.Document, outDir, location string) {
 		violations = "1 policy violation"
 	}
 	line := fmt.Sprintf("ScanProof %s: %s · %s · %s mode · report %s · evidence in %s",
-		doc.Verdict, doc.Image.Reference, violations, doc.Policy.Mode, doc.ReportID, where)
+		doc.Verdict, report.ArtifactLabel(doc), violations, doc.Policy.Mode, doc.ReportID, where)
 	fmt.Fprintln(env.Stdout, line)
+	if doc.IsDirectory() {
+		// Ready to paste into the rescan images file.
+		fmt.Fprintf(env.Stdout, "Rescan inventory line: %s@%s\n", doc.Image.Reference, doc.Image.Digest)
+	}
 
 	if env.Getenv("GITHUB_ACTIONS") != "true" {
 		return

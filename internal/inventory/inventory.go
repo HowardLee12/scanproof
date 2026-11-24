@@ -1,22 +1,31 @@
 // Package inventory finds the container images that are running right now,
-// so they can be rescanned against today's vulnerability data.
+// and the deployed directories listed in a file, so they can be rescanned
+// against today's vulnerability data.
 package inventory
 
 import (
-	"bufio"
 	"context"
-	"fmt"
-	"os"
 	"strings"
 
 	"github.com/HowardLee12/scanproof/internal/model"
 )
 
-// RunningImage is one image and the places it runs.
+// RunningImage is one image, or one deployed directory, and the places it
+// runs. A directory's Reference is dir:NAME[:VERSION] and its Digest is the
+// tree digest; it can only be rescanned from a stored SBOM.
 type RunningImage struct {
 	Reference string   `json:"reference"`
 	Digest    string   `json:"digest,omitempty"`
 	Locations []string `json:"locations"`
+	Directory bool     `json:"directory,omitempty"`
+}
+
+// Label names the image or directory for people.
+func (r RunningImage) Label() string {
+	if r.Directory {
+		return "directory " + strings.TrimPrefix(r.Reference, "dir:")
+	}
+	return r.Reference
 }
 
 // ScanReference pins the image by digest when one is known, so the scan
@@ -33,6 +42,22 @@ type Source interface {
 	List(ctx context.Context) ([]RunningImage, error)
 }
 
+// Combined lists the images of several sources, in order.
+type Combined []Source
+
+// List calls every source; an error from any of them stops the listing.
+func (c Combined) List(ctx context.Context) ([]RunningImage, error) {
+	out := make([]RunningImage, 0)
+	for _, s := range c {
+		images, err := s.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, images...)
+	}
+	return out, nil
+}
+
 // Merge combines images with the same digest (or the same reference when no
 // digest is known), keeping the order in which they were first seen.
 func Merge(images []RunningImage) []RunningImage {
@@ -46,7 +71,7 @@ func Merge(images []RunningImage) []RunningImage {
 		i, seen := index[key]
 		if !seen {
 			index[key] = len(out)
-			out = append(out, RunningImage{Reference: img.Reference, Digest: img.Digest})
+			out = append(out, RunningImage{Reference: img.Reference, Digest: img.Digest, Directory: img.Directory})
 			i = len(out) - 1
 		}
 		for _, loc := range img.Locations {
@@ -65,34 +90,4 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
-}
-
-// File reads image references from a text file, one per line. Blank lines
-// and lines starting with # are ignored. Use it for hosts that are not in
-// Kubernetes or ECS.
-type File struct {
-	Path string
-}
-
-// List reads the file.
-func (f File) List(_ context.Context) ([]RunningImage, error) {
-	fh, err := os.Open(f.Path)
-	if err != nil {
-		return nil, fmt.Errorf("open image list: %w", err)
-	}
-	defer fh.Close()
-	out := make([]RunningImage, 0)
-	sc := bufio.NewScanner(fh)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		ref, _, _ := strings.Cut(line, "@")
-		out = append(out, RunningImage{Reference: ref, Digest: model.DigestOf(line), Locations: []string{"listed in " + f.Path}})
-	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("read image list: %w", err)
-	}
-	return out, nil
 }

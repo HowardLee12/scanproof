@@ -29,12 +29,14 @@ type Env struct {
 	HTTPClient *http.Client
 }
 
-const usage = `ScanProof scans a container image and records the result as evidence.
+const usage = `ScanProof scans a container image, or software installed in a directory, and
+records the result as evidence.
 
 Usage:
   scanproof scan [flags] IMAGE
   scanproof scan [flags] --trivy-results FILE
-  scanproof rescan --store URL --inventory kubernetes|ecs|file [flags]
+  scanproof scan --dir --name NAME [--version VERSION] [flags] PATH
+  scanproof rescan --store URL --inventory kubernetes|ecs|file[,...] [flags]
   scanproof report --store URL --from YYYY-MM-DD --to YYYY-MM-DD [flags]
   scanproof version
 

@@ -69,16 +69,27 @@ type ManifestFile struct {
 
 // Manifest lets anyone check later that the evidence files were not changed.
 type Manifest struct {
-	Schema      string         `json:"schema"`
-	ReportID    string         `json:"report_id"`
-	GeneratedAt time.Time      `json:"generated_at"`
-	ImageDigest string         `json:"image_digest,omitempty"`
-	Files       []ManifestFile `json:"files"`
+	Schema      string    `json:"schema"`
+	ReportID    string    `json:"report_id"`
+	GeneratedAt time.Time `json:"generated_at"`
+	// ImageDigest is the image digest, or the tree digest of a directory.
+	ImageDigest  string         `json:"image_digest,omitempty"`
+	ArtifactType string         `json:"artifact_type,omitempty"`
+	Files        []ManifestFile `json:"files"`
 }
 
-// BuildManifest hashes the named files of a scan report in dir.
+// BuildManifest hashes the named files of a scan report in dir. It records
+// the artifact type, so a rescan can tell a directory's stored SBOM from an
+// image's.
 func BuildManifest(dir string, doc Document, names []string) (Manifest, error) {
-	return BuildManifestFor(dir, doc.ReportID, doc.GeneratedAt, doc.Image.Digest, names)
+	m, err := BuildManifestFor(dir, doc.ReportID, doc.GeneratedAt, doc.Image.Digest, names)
+	if err != nil {
+		return Manifest{}, err
+	}
+	return Manifest{
+		Schema: m.Schema, ReportID: m.ReportID, GeneratedAt: m.GeneratedAt,
+		ImageDigest: m.ImageDigest, ArtifactType: doc.ArtifactType, Files: m.Files,
+	}, nil
 }
 
 // BuildManifestFor hashes the named files in dir for any report ID.

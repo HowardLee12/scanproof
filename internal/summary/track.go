@@ -6,6 +6,7 @@ import (
 
 	"github.com/HowardLee12/scanproof/internal/model"
 	"github.com/HowardLee12/scanproof/internal/policy"
+	"github.com/HowardLee12/scanproof/internal/report"
 )
 
 // How a tracked finding stopped being open.
@@ -46,6 +47,20 @@ func imageName(ref string) string {
 	return model.ImageName(ref)
 }
 
+// artifactName is what findings are tracked by: the image name, or
+// dir:NAME for a directory, so every version of a directory is compared
+// with the others and never with an image of the same name.
+func artifactName(doc report.Document) string {
+	if !doc.IsDirectory() {
+		return imageName(doc.Image.Reference)
+	}
+	name, _, ok := model.ParseDirectoryReference(doc.Image.Reference)
+	if !ok && doc.Directory != nil {
+		name = doc.Directory.Name
+	}
+	return model.DirectoryReference(name, "")
+}
+
 // status of one finding in one day's scans of an image name.
 type status int
 
@@ -70,7 +85,7 @@ func track(scans []Loaded, pol policy.Policy) []TrackedFinding {
 	byImage := map[string][]Loaded{}
 	names := []string{}
 	for _, s := range scans {
-		name := imageName(s.Image.Reference)
+		name := artifactName(s.Document)
 		if _, ok := byImage[name]; !ok {
 			names = append(names, name)
 		}

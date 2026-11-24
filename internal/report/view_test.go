@@ -20,8 +20,8 @@ func TestPDFViewHeadlineAndRows(t *testing.T) {
 	if v.DigestShort != "sha256:02bb6f428431…" {
 		t.Errorf("short digest = %q", v.DigestShort)
 	}
-	if !hasRow(v.ImageRows, "Digest", "sha256:02bb6f428431fbc2809c5d1b41eab5a68350194fb508869a33cb1af4444c9b11") {
-		t.Errorf("image rows = %+v", v.ImageRows)
+	if !hasRow(v.ArtifactRows, "Digest", "sha256:02bb6f428431fbc2809c5d1b41eab5a68350194fb508869a33cb1af4444c9b11") {
+		t.Errorf("image rows = %+v", v.ArtifactRows)
 	}
 	if !hasRow(v.ContextRows, "Repository", "example-org/example-api") {
 		t.Errorf("context rows = %+v", v.ContextRows)
@@ -89,8 +89,8 @@ func TestPDFViewForRescan(t *testing.T) {
 		Method: MethodSBOM, SBOMFrom: "SR-20261101-AAAAAA"}
 	doc.Image.SizeBytes = 0
 	v := newPDFView(doc, "")
-	if v.ContextTitle != "Running image" || !hasRow(v.ImageRows, "Size", "1 layer") {
-		t.Errorf("title %q, image rows %+v", v.ContextTitle, v.ImageRows)
+	if v.ContextTitle != "Running image" || !hasRow(v.ArtifactRows, "Size", "1 layer") {
+		t.Errorf("title %q, image rows %+v", v.ContextTitle, v.ArtifactRows)
 	}
 	if !hasRow(v.ContextRows, "Running in", "k8s gpu/a, k8s gpu/b, k8s gpu/c, k8s gpu/d, k8s gpu/e and 1 more") {
 		t.Errorf("context rows = %+v", v.ContextRows)

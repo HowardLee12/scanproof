@@ -248,7 +248,7 @@ func TestPopulationCSV(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(out)
-	if !strings.HasPrefix(text, "report_id,scanned_at_utc,trigger,image,digest,verdict,violations,repository,commit,evidence\n") {
+	if !strings.HasPrefix(text, "report_id,scanned_at_utc,trigger,artifact_type,image,digest,verdict,violations,repository,commit,evidence\n") {
 		t.Errorf("header = %q", strings.SplitN(text, "\n", 2)[0])
 	}
 	if !strings.Contains(text, "'=cmd|calc") {

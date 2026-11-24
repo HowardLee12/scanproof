@@ -9,7 +9,7 @@ import (
 )
 
 var populationHeader = []string{
-	"report_id", "scanned_at_utc", "trigger", "image", "digest", "verdict",
+	"report_id", "scanned_at_utc", "trigger", "artifact_type", "image", "digest", "verdict",
 	"violations", "repository", "commit", "evidence",
 }
 
@@ -22,7 +22,7 @@ func PopulationCSV(rows []PopulationRow) ([]byte, error) {
 	}
 	for _, r := range rows {
 		record := []string{
-			r.ReportID, r.ScannedAt, r.Trigger, r.Image, r.Digest, r.Verdict,
+			r.ReportID, r.ScannedAt, r.Trigger, r.ArtifactType, r.Image, r.Digest, r.Verdict,
 			strconv.Itoa(r.Violations), r.Repository, r.Commit, r.Evidence,
 		}
 		for i, v := range record {

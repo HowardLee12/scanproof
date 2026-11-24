@@ -69,14 +69,33 @@ func (r Runner) Scan(ctx context.Context, image string) (Scan, error) {
 		return Scan{}, fmt.Errorf("image reference %q must not start with '-'", image)
 	}
 
-	args := append([]string{"image", "--quiet", "--format", "json", "--scanners", "vuln,secret", "--list-all-pkgs"},
-		r.hardenedFlags()...)
+	extra := []string{}
 	if r.Platform != "" {
-		args = append(args, "--platform", r.Platform)
+		extra = append(extra, "--platform", r.Platform)
 	}
-	out, err := r.exec(ctx, r.Bin, append(args, image)...)
+	return r.scanArtifact(ctx, "image", image, extra)
+}
+
+// ScanRootfs scans an installed directory tree for vulnerabilities and
+// secrets. Trivy's rootfs mode finds installed packages: Python dist-info
+// and egg-info metadata, Go binaries, jars and OS package databases. path
+// must be absolute, so it can never be read as a flag.
+func (r Runner) ScanRootfs(ctx context.Context, path string) (Scan, error) {
+	if !filepath.IsAbs(strings.TrimSpace(path)) {
+		return Scan{}, fmt.Errorf("directory %q must be an absolute path", path)
+	}
+	return r.scanArtifact(ctx, "rootfs", path, nil)
+}
+
+// scanArtifact runs one `trivy image` or `trivy rootfs` scan with every
+// package listed, which the SBOM for later rescans needs.
+func (r Runner) scanArtifact(ctx context.Context, mode, target string, extra []string) (Scan, error) {
+	args := append([]string{mode, "--quiet", "--format", "json", "--scanners", "vuln,secret", "--list-all-pkgs"},
+		r.hardenedFlags()...)
+	args = append(args, extra...)
+	out, err := r.exec(ctx, r.Bin, append(args, target)...)
 	if err != nil {
-		return Scan{}, fmt.Errorf("trivy scan of %s failed: %w", image, err)
+		return Scan{}, fmt.Errorf("trivy scan of %s failed: %w", target, err)
 	}
 	res, err := Parse(bytes.NewReader(out))
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/HowardLee12/scanproof/internal/exception"
 	"github.com/HowardLee12/scanproof/internal/model"
@@ -20,6 +19,10 @@ const maxPackageRows = 15
 // pdfView is the data the Typst template renders. Every value is already
 // formatted, so the template only handles layout.
 type pdfView struct {
+	Title             string     `json:"title"`
+	Subtitle          string     `json:"subtitle"`
+	ArtifactTitle     string     `json:"artifact_title"`
+	Subject           string     `json:"subject"`
 	ReportID          string     `json:"report_id"`
 	GeneratedAt       string     `json:"generated_at"`
 	ToolVersion       string     `json:"tool_version"`
@@ -27,7 +30,7 @@ type pdfView struct {
 	Headline          string     `json:"headline"`
 	Detail            string     `json:"detail"`
 	DigestShort       string     `json:"digest_short"`
-	ImageRows         []pdfRow   `json:"image_rows"`
+	ArtifactRows      []pdfRow   `json:"artifact_rows"`
 	ContextTitle      string     `json:"context_title"`
 	ContextRows       []pdfRow   `json:"context_rows"`
 	Tiles             []pdfTile  `json:"tiles"`
@@ -42,7 +45,9 @@ type pdfView struct {
 	ExceptionsUnused  [][]string `json:"exceptions_unused"`
 	IntegrityRows     []pdfRow   `json:"integrity_rows"`
 	SecretsNote       string     `json:"secrets_note"`
+	SecretsNone       string     `json:"secrets_none"`
 	Malware           bool       `json:"malware"`
+	LayerColumn       bool       `json:"layer_column"`
 	MalwareEngines    [][]string `json:"malware_engines"`
 	MalwareStats      string     `json:"malware_stats"`
 	MalwareFindings   [][]string `json:"malware_findings"`
@@ -96,7 +101,12 @@ var verdictAccents = map[policy.Verdict]string{
 
 func newPDFView(doc Document, resultsSHA256 string) pdfView {
 	vulns, omitted := criticalAndHigh(doc.Vulnerabilities)
+	directory := doc.IsDirectory()
 	return pdfView{
+		Title:             map[bool]string{true: "Directory Scan Report", false: "Container Image Scan Report"}[directory],
+		Subtitle:          subtitle(doc),
+		ArtifactTitle:     map[bool]string{true: "Directory", false: "Image"}[directory],
+		Subject:           subject(doc),
 		ReportID:          doc.ReportID,
 		GeneratedAt:       formatTime(doc.GeneratedAt),
 		ToolVersion:       doc.Tool.Version,
@@ -104,7 +114,7 @@ func newPDFView(doc Document, resultsSHA256 string) pdfView {
 		Headline:          headline(doc),
 		Detail:            detail(doc),
 		DigestShort:       shortDigest(doc.Image.Digest),
-		ImageRows:         imageRows(doc.Image),
+		ArtifactRows:      artifactRows(doc),
 		ContextTitle:      contextTitle(doc),
 		ContextRows:       contextRows(doc),
 		Tiles:             tiles(doc),
@@ -119,12 +129,14 @@ func newPDFView(doc Document, resultsSHA256 string) pdfView {
 		ExceptionsUnused:  exceptionRows(doc.Exceptions.Unused),
 		IntegrityRows:     integrityRows(doc, resultsSHA256),
 		SecretsNote:       secretsNote(doc),
+		SecretsNone:       "No keys, tokens or passwords were found in the " + subject(doc) + "'s files.",
 		Malware:           doc.Malware != nil,
+		LayerColumn:       !directory,
 		MalwareEngines:    malwareEngines(doc.Malware),
-		MalwareStats:      malwareStats(doc.Malware),
-		MalwareFindings:   malwareFindings(doc.Malware),
-		MalwareSkipped:    malwareSkipped(doc.Malware),
-		CC68Text:          cc68Text(doc.Malware),
+		MalwareStats:      malwareStats(doc.Malware, directory),
+		MalwareFindings:   malwareFindings(doc.Malware, directory),
+		MalwareSkipped:    malwareSkipped(doc.Malware, directory),
+		CC68Text:          cc68Text(doc.Malware, directory),
 	}
 }
 
@@ -155,90 +167,6 @@ func nonEmpty(rows []pdfRow) []pdfRow {
 		}
 	}
 	return out
-}
-
-func contextTitle(doc Document) string {
-	if doc.Runtime != nil {
-		return "Running image"
-	}
-	return "Change being released"
-}
-
-func imageRows(img model.Image) []pdfRow {
-	parts := []string{}
-	if b := formatBytes(img.SizeBytes); b != "" {
-		parts = append(parts, b)
-	}
-	if img.Layers > 0 {
-		parts = append(parts, plural(img.Layers, "layer", "layers"))
-	}
-	size := strings.Join(parts, " · ")
-	return nonEmpty([]pdfRow{
-		{Label: "Reference", Value: img.Reference},
-		{Label: "Digest", Value: img.Digest, Mono: true},
-		{Label: "Operating system", Value: img.OS},
-		{Label: "Size", Value: size},
-		{Label: "Built", Value: formatTimePtr(img.Created)},
-		{Label: "Image ID", Value: img.ImageID, Mono: true},
-	})
-}
-
-func secretsNote(doc Document) string {
-	switch {
-	case doc.Runtime != nil && doc.Runtime.Method == MethodSBOM:
-		return "This rescan checked the stored SBOM for new vulnerabilities. Secrets were checked when the image was first scanned."
-	case doc.Scanner.Imported:
-		return "These results were imported from an existing Trivy report, so ScanProof could not confirm that secret scanning was enabled."
-	}
-	return ""
-}
-
-func runtimeRows(doc Document) []pdfRow {
-	rt := doc.Runtime
-	locations := rt.Locations
-	more := ""
-	if len(locations) > 5 {
-		more = fmt.Sprintf(" and %d more", len(locations)-5)
-		locations = locations[:5]
-	}
-	method := "Pulled and scanned the running image"
-	if rt.Method == MethodSBOM {
-		method = "Checked the SBOM saved by report " + rt.SBOMFrom + " against the current vulnerability database"
-	}
-	return []pdfRow{
-		{Label: "Trigger", Value: "Rescan of a running image"},
-		{Label: "Running in", Value: strings.Join(locations, ", ") + more},
-		{Label: "Method", Value: method},
-		{Label: "Scanned", Value: formatTime(doc.ScannedAt)},
-	}
-}
-
-func contextRows(doc Document) []pdfRow {
-	c := doc.Context
-	if doc.Runtime != nil {
-		return runtimeRows(doc)
-	}
-	if !c.InCI() {
-		return []pdfRow{{Label: "Run", Value: "Not run in a recognised CI system"}}
-	}
-	pr := ""
-	if c.PullRequest > 0 {
-		pr = fmt.Sprintf("#%d · %s", c.PullRequest, c.PullRequestURL)
-	}
-	trigger := c.Actor
-	if c.Event != "" {
-		trigger = fmt.Sprintf("%s (%s)", c.Actor, c.Event)
-	}
-	return nonEmpty([]pdfRow{
-		{Label: "Repository", Value: c.Repository},
-		{Label: "Commit", Value: c.Commit, Mono: true},
-		{Label: "Branch", Value: c.Branch},
-		{Label: "Pull request", Value: pr},
-		{Label: "Workflow", Value: c.Workflow},
-		{Label: "CI run", Value: c.RunURL},
-		{Label: "Triggered by", Value: trigger},
-		{Label: "Scanned", Value: formatTime(doc.ScannedAt)},
-	})
 }
 
 func tiles(doc Document) []pdfTile {
@@ -409,79 +337,4 @@ func orText(s, fallback string) string {
 		return fallback
 	}
 	return s
-}
-
-// maxSkippedRows bounds the skipped-files table; results.json lists all.
-const maxSkippedRows = 20
-
-func malwareEngines(m *MalwareSection) [][]string {
-	if m == nil {
-		return [][]string{}
-	}
-	rows := make([][]string, 0, len(m.Engines))
-	for _, e := range m.Engines {
-		rows = append(rows, []string{e.Name, e.Version, orText(shortHashes(e.Database), "—"), orText(e.DatabaseDate, "—")})
-	}
-	return rows
-}
-
-func malwareStats(m *MalwareSection) string {
-	if m == nil {
-		return ""
-	}
-	stats := fmt.Sprintf("Scanned %d files (%s) in %s of image %s, read from the %s. "+
-		"Every layer is scanned, so files that a later layer deletes are checked too.",
-		m.FilesScanned, formatBytes(m.BytesScanned), plural(m.Layers, "layer", "layers"), shortDigest(m.ConfigDigest), m.ImageSource)
-	if len(m.Skipped) > 0 {
-		stats += fmt.Sprintf(" %s not scanned and %s listed below.", plural(len(m.Skipped), "file was", "files were"),
-			map[bool]string{true: "is", false: "are"}[len(m.Skipped) == 1])
-	}
-	return stats
-}
-
-func malwareFindings(m *MalwareSection) [][]string {
-	if m == nil {
-		return [][]string{}
-	}
-	rows := make([][]string, 0, len(m.Findings))
-	for _, f := range m.Findings {
-		rows = append(rows, []string{f.Engine, f.Signature, f.Path, strconv.Itoa(f.Layer), findingStatus(f.ExceptionID, f.Violation)})
-	}
-	return rows
-}
-
-func malwareSkipped(m *MalwareSection) [][]string {
-	if m == nil {
-		return [][]string{}
-	}
-	rows := make([][]string, 0, maxSkippedRows)
-	for i, f := range m.Skipped {
-		if i == maxSkippedRows {
-			rows = append(rows, []string{fmt.Sprintf("%d more in results.json", len(m.Skipped)-maxSkippedRows), "", "", ""})
-			break
-		}
-		rows = append(rows, []string{f.Path, strconv.Itoa(f.Layer), orText(formatBytes(f.Bytes), "—"), f.Reason})
-	}
-	return rows
-}
-
-// shortHashes shortens "sha256:<64 hex>" inside text to 12 hex characters so
-// it fits a table cell; results.json keeps the full value.
-func shortHashes(s string) string {
-	before, hash, ok := strings.Cut(s, "sha256:")
-	if !ok || len(hash) <= 12 {
-		return s
-	}
-	return before + "sha256:" + hash[:12] + "…"
-}
-
-func cc68Text(m *MalwareSection) string {
-	if m == nil {
-		return ""
-	}
-	if len(m.Skipped) > 0 {
-		return fmt.Sprintf("Every layer of the image was scanned for malware with the engines and signature versions shown above. %s could not be fully scanned and %s listed in the malware section.",
-			plural(len(m.Skipped), "file", "files"), map[bool]string{true: "is", false: "are"}[len(m.Skipped) == 1])
-	}
-	return "Every file in every layer of the image was scanned for malware with the engines and signature versions shown above."
 }

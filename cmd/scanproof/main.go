@@ -1,5 +1,5 @@
-// Command scanproof scans a container image and records the result as
-// evidence for audits such as SOC 2.
+// Command scanproof scans a container image, or software installed in a
+// directory, and records the result as evidence for audits such as SOC 2.
 package main
 
 import (

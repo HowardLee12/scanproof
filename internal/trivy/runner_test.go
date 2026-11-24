@@ -264,3 +264,47 @@ func TestRunnerPassesPlatform(t *testing.T) {
 		t.Errorf("command = %v", fake.calls[0])
 	}
 }
+
+func TestScanRootfsUsesRootfsModeAndTheSameHardening(t *testing.T) {
+	fake := &fakeExec{outputs: map[string][]byte{
+		"rootfs":  readFixture(t, "trivy-alpine-3.18.0.json"),
+		"version": readFixture(t, "trivy-version.json"),
+	}}
+	r := Runner{Bin: "trivy", Timeout: time.Minute, Platform: "linux/arm64", exec: fake.run}
+	scan, err := r.ScanRootfs(context.Background(), "/mnt/shared/venv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := strings.Join(fake.calls[0], " ")
+	for _, want := range []string{
+		"trivy rootfs", "--format json", "--scanners vuln,secret", "--list-all-pkgs",
+		"--config " + os.DevNull, "--ignorefile  ", "--severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL",
+		"--ignore-unfixed=false", "--timeout 1m0s",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("command %q is missing %q", cmd, want)
+		}
+	}
+	if !strings.HasSuffix(cmd, " /mnt/shared/venv") || strings.Contains(cmd, "--platform") {
+		t.Errorf("the path must come last and --platform only applies to images: %q", cmd)
+	}
+	if len(scan.Raw) == 0 || scan.Result.Scanner.DBUpdatedAt == nil {
+		t.Error("the raw report (for the SBOM) and the database time are needed")
+	}
+}
+
+func TestScanRootfsRejectsBadPaths(t *testing.T) {
+	r := NewRunner("trivy", time.Minute)
+	for _, p := range []string{"", "  ", "--config=/etc/passwd", "relative/path"} {
+		if _, err := r.ScanRootfs(context.Background(), p); err == nil {
+			t.Errorf("%q must be rejected", p)
+		}
+	}
+}
+
+func TestScanRootfsReportsFailure(t *testing.T) {
+	r := Runner{Bin: "trivy", exec: (&fakeExec{err: errors.New("exit status 1: permission denied")}).run}
+	if _, err := r.ScanRootfs(context.Background(), "/srv/app"); err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("got %v", err)
+	}
+}
