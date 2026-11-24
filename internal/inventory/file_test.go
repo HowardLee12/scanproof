@@ -64,8 +64,8 @@ func TestFileRejectsBadDirectoryLines(t *testing.T) {
 		"dir:a:b:c@" + treeA:                               "invalid directory",
 	}
 	for line, want := range cases {
-		_, err := listFile(t, "# ok\n"+line+"\n")
-		if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "line 2") {
+		images, err := listFile(t, "# ok\n"+line+"\n")
+		if len(images) != 0 || err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "line 2") {
 			t.Errorf("%q: got %v, want an error with %q and the line number", line, err, want)
 		}
 	}
@@ -100,15 +100,53 @@ func (s staticSource) List(context.Context) ([]RunningImage, error) { return s.i
 
 func TestCombinedListsEverySourceInOrder(t *testing.T) {
 	c := Combined{
-		staticSource{images: []RunningImage{{Reference: "repo/api:1"}}},
-		staticSource{images: []RunningImage{{Reference: "dir:acme-vllm", Directory: true}}},
+		{Name: "kubernetes", Source: staticSource{images: []RunningImage{{Reference: "repo/api:1"}}}},
+		{Name: "file", Source: staticSource{images: []RunningImage{{Reference: "dir:acme-vllm", Directory: true}}}},
 	}
-	got, err := c.List(context.Background())
-	if err != nil || len(got) != 2 || got[0].Reference != "repo/api:1" || !got[1].Directory {
-		t.Fatalf("got %+v, %v", got, err)
+	got, failures := c.List(context.Background())
+	if len(failures) != 0 || len(got) != 2 || got[0].Reference != "repo/api:1" || !got[1].Directory {
+		t.Fatalf("got %+v, %v", got, failures)
 	}
-	boom := errors.New("forbidden")
-	if _, err := (Combined{c[0], staticSource{err: boom}}).List(context.Background()); !errors.Is(err, boom) {
-		t.Fatalf("an error from any source must stop the listing, got %v", err)
+}
+
+func TestFileKeepsGoodLinesWhenSomeAreBad(t *testing.T) {
+	got, err := listFile(t, "\ufeffdir:acme-vllm@"+treeA+"\ndir:broken\nrepo/web:2\ndir:acme:@"+treeB+"\n")
+	if len(got) != 2 || got[0].Reference != "dir:acme-vllm" || got[1].Reference != "repo/web:2" {
+		t.Fatalf("good lines (a byte order mark on line 1 is ignored) = %+v", got)
+	}
+	var partial *PartialError
+	if !errors.As(err, &partial) || len(partial.Failures) != 2 {
+		t.Fatalf("want one failure per bad line, got %v", err)
+	}
+	if !strings.Contains(partial.Failures[0].Where, "line 2") || !strings.Contains(partial.Failures[1].Where, "line 4") {
+		t.Errorf("failures = %+v", partial.Failures)
+	}
+}
+
+func TestMergeKeysOnTheKindOfArtifact(t *testing.T) {
+	got := Merge([]RunningImage{
+		{Reference: "dir:acme-vllm:1", Digest: treeA, Directory: true, Locations: []string{"a"}},
+		{Reference: "dir:other:1", Digest: treeA, Directory: true, Locations: []string{"b"}},
+		{Reference: "repo/api:1", Digest: treeA, Locations: []string{"k8s prod/api"}},
+		{Reference: "dir:acme-vllm:1", Digest: treeA, Directory: true, Locations: []string{"c"}},
+	})
+	if len(got) != 3 || strings.Join(got[0].Locations, ",") != "a,c" || got[2].Directory {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestCombinedGoesOnAfterAFailedSource(t *testing.T) {
+	boom := errors.New("pods is forbidden")
+	c := Combined{
+		{Name: "kubernetes", Source: staticSource{err: boom}},
+		{Name: "file", Source: staticSource{images: []RunningImage{{Reference: "dir:acme", Directory: true}}, err: &PartialError{
+			Failures: []Failure{{Where: "images file x line 3", Err: errors.New("bad line")}}}}},
+	}
+	images, failures := c.List(context.Background())
+	if len(images) != 1 || len(failures) != 2 {
+		t.Fatalf("images %+v failures %+v", images, failures)
+	}
+	if failures[0].Where != "kubernetes inventory" || !errors.Is(failures[0].Err, boom) || failures[1].Where != "images file x line 3" {
+		t.Errorf("failures = %+v", failures)
 	}
 }

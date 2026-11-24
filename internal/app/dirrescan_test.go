@@ -127,7 +127,6 @@ func TestRescanInventoryList(t *testing.T) {
 		{"--store", "file:///x", "--inventory", "kubernetes,docker"},
 		{"--store", "file:///x", "--inventory", "kubernetes,"},
 		{"--store", "file:///x", "--inventory", "kubernetes,file"},
-		{"--store", "file:///x", "--inventory", "kubernetes", "--images-file", "i.txt"},
 	} {
 		if _, err := parseRescanOptions(bad, io.Discard); err == nil {
 			t.Errorf("%v should be rejected", bad)

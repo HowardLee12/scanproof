@@ -5,6 +5,7 @@ package inventory
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/HowardLee12/scanproof/internal/model"
@@ -42,32 +43,64 @@ type Source interface {
 	List(ctx context.Context) ([]RunningImage, error)
 }
 
-// Combined lists the images of several sources, in order.
-type Combined []Source
+// Failure is an inventory source, or one line of the images file, that
+// could not be read. A rescan reports it as failed and rescans the rest.
+type Failure struct {
+	Where string
+	Err   error
+}
 
-// List calls every source; an error from any of them stops the listing.
-func (c Combined) List(ctx context.Context) ([]RunningImage, error) {
+// PartialError is returned by a source that listed some images but could
+// not read everything; the images it returned are still valid.
+type PartialError struct {
+	Failures []Failure
+}
+
+func (e *PartialError) Error() string {
+	parts := make([]string, 0, len(e.Failures))
+	for _, f := range e.Failures {
+		parts = append(parts, f.Where+": "+f.Err.Error())
+	}
+	return strings.Join(parts, "; ")
+}
+
+// NamedSource is a source and the name failures are reported under.
+type NamedSource struct {
+	Name   string
+	Source Source
+}
+
+// Combined lists the images of several sources, in order.
+type Combined []NamedSource
+
+// List calls every source. A source that fails, and every line a source
+// could not read, becomes a Failure; the others are still listed.
+func (c Combined) List(ctx context.Context) ([]RunningImage, []Failure) {
 	out := make([]RunningImage, 0)
+	failures := make([]Failure, 0)
 	for _, s := range c {
-		images, err := s.List(ctx)
-		if err != nil {
-			return nil, err
+		images, err := s.Source.List(ctx)
+		var partial *PartialError
+		switch {
+		case errors.As(err, &partial):
+			failures = append(failures, partial.Failures...)
+		case err != nil:
+			failures = append(failures, Failure{Where: s.Name + " inventory", Err: err})
 		}
 		out = append(out, images...)
 	}
-	return out, nil
+	return out, failures
 }
 
-// Merge combines images with the same digest (or the same reference when no
-// digest is known), keeping the order in which they were first seen.
+// Merge combines copies of one image (the same digest, or the same reference
+// when no digest is known) and of one directory (the same reference and tree
+// digest), keeping the order in which they were first seen. An image and a
+// directory are never merged, even with the same digest.
 func Merge(images []RunningImage) []RunningImage {
 	out := make([]RunningImage, 0, len(images))
 	index := map[string]int{}
 	for _, img := range images {
-		key := img.Digest
-		if key == "" {
-			key = img.Reference
-		}
+		key := mergeKey(img)
 		i, seen := index[key]
 		if !seen {
 			index[key] = len(out)
@@ -81,6 +114,16 @@ func Merge(images []RunningImage) []RunningImage {
 		}
 	}
 	return out
+}
+
+func mergeKey(img RunningImage) string {
+	if img.Directory {
+		return "directory\x00" + img.Reference + "\x00" + img.Digest
+	}
+	if img.Digest != "" {
+		return "image\x00" + img.Digest
+	}
+	return "image\x00" + img.Reference
 }
 
 func contains(list []string, s string) bool {

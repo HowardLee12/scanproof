@@ -23,12 +23,40 @@ var errSkipped = errors.New("no stored SBOM and --pull-missing=false")
 // rescan never has access to the directory itself, so it cannot scan it.
 var errNoDirectoryScan = errors.New("no stored scan for this directory; run scanproof scan --dir on a host that has it")
 
-// rescanOutcome is the result for one running image or directory.
+// rescanOutcome is the result for one running image or directory, or an
+// inventory source or line that could not be read (where is then set).
 type rescanOutcome struct {
 	image inventory.RunningImage
+	where string
 	doc   report.Document
 	err   error
 }
+
+// label names the outcome for people.
+func (o rescanOutcome) label() string {
+	if o.where != "" {
+		return o.where
+	}
+	return o.image.Label()
+}
+
+// storedScanError is a directory whose stored scans exist but could not be
+// used, for example because a file no longer matches its manifest.
+type storedScanError struct {
+	reportID string
+	tried    int
+	err      error
+}
+
+func (e *storedScanError) Error() string {
+	msg := fmt.Sprintf("stored scan %s could not be used: %v", e.reportID, e.err)
+	if e.tried > 1 {
+		msg += fmt.Sprintf(" (nor could %d older stored scans; see the warnings)", e.tried-1)
+	}
+	return msg
+}
+
+func (e *storedScanError) Unwrap() error { return e.err }
 
 // rescanAll rescans every image and directory, one at a time.
 func rescanAll(ctx context.Context, opts rescanOptions, env Env, st store.Store, setup evalSetup, images []inventory.RunningImage) []rescanOutcome {
@@ -120,8 +148,9 @@ func rescanResult(res model.ScanResult, img inventory.RunningImage) model.ScanRe
 
 // rescanFromSBOM checks the newest stored SBOM of the digest that matches
 // its scan's manifest. It returns the report ID the SBOM came from, or ""
-// when no usable SBOM exists; a broken SBOM is skipped with a warning so an
-// image can still be pulled and scanned.
+// when there is none. A broken SBOM is skipped with a warning, so an image
+// can still be pulled and scanned; for a directory, which cannot be pulled,
+// stored scans that all fail are an error that names the newest one.
 func rescanFromSBOM(ctx context.Context, env Env, st store.Store, runner trivy.Runner, img inventory.RunningImage) (trivy.Scan, string, error) {
 	if _, err := store.DigestIndexPrefix(img.Digest); err != nil {
 		return trivy.Scan{}, "", nil
@@ -130,18 +159,30 @@ func rescanFromSBOM(ctx context.Context, env Env, st store.Store, runner trivy.R
 	if err != nil {
 		return trivy.Scan{}, "", err
 	}
+	var first *storedScanError
 	for _, e := range entries {
-		sbom, err := verifiedSBOM(ctx, st, e, img)
+		scan, err := scanStoredSBOM(ctx, st, runner, e, img)
 		if err == nil {
-			scan, scanErr := runner.ScanSBOM(ctx, sbom)
-			if scanErr == nil {
-				return scan, e.ReportID, nil
-			}
-			err = scanErr
+			return scan, e.ReportID, nil
 		}
 		fmt.Fprintf(env.Stderr, "scanproof: warning: %s: not using the SBOM from %s: %v\n", img.Label(), e.ReportID, err)
+		if first == nil {
+			first = &storedScanError{reportID: e.ReportID, err: err}
+		}
+		first.tried++
+	}
+	if first != nil && img.Directory {
+		return trivy.Scan{}, "", first
 	}
 	return trivy.Scan{}, "", nil
+}
+
+func scanStoredSBOM(ctx context.Context, st store.Store, runner trivy.Runner, e store.IndexEntry, img inventory.RunningImage) (trivy.Scan, error) {
+	sbom, err := verifiedSBOM(ctx, st, e, img)
+	if err != nil {
+		return trivy.Scan{}, err
+	}
+	return runner.ScanSBOM(ctx, sbom)
 }
 
 // verifiedSBOM reads an SBOM and checks it against its scan's manifest: the

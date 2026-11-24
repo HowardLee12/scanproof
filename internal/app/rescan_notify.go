@@ -14,6 +14,17 @@ import (
 // maxRescanLines bounds the list in the run's chat message.
 const maxRescanLines = 10
 
+// maxReasonChars bounds one failure reason in the chat message.
+const maxReasonChars = 200
+
+func shorten(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
+}
+
 // sendRescanNotification posts one summary for the whole run.
 func sendRescanNotification(ctx context.Context, opts rescanOptions, env Env, outcomes []rescanOutcome) {
 	verdict, lines := rescanAttention(outcomes)
@@ -30,7 +41,9 @@ func sendRescanNotification(ctx context.Context, opts rescanOptions, env Env, ou
 	}
 	checked := make([]inventory.RunningImage, 0, len(outcomes))
 	for _, o := range outcomes {
-		checked = append(checked, o.image)
+		if o.where == "" {
+			checked = append(checked, o.image)
+		}
 	}
 	msg := notify.Message{
 		Verdict:        verdict,
@@ -58,13 +71,17 @@ func rescanAttention(outcomes []rescanOutcome) (policy.Verdict, []string) {
 	verdict := policy.VerdictPass
 	lines := []string{}
 	for _, o := range outcomes {
+		var stored *storedScanError
 		switch {
 		case errors.Is(o.err, errNoDirectoryScan):
 			verdict = policy.VerdictWarn
-			lines = append(lines, o.image.Label()+": no stored scan; run scanproof scan --dir on a host that has it")
+			lines = append(lines, o.label()+": no stored scan; run scanproof scan --dir on a host that has it")
+		case errors.As(o.err, &stored), o.err != nil && o.where != "":
+			verdict = policy.VerdictWarn
+			lines = append(lines, o.label()+": "+shorten(o.err.Error(), maxReasonChars))
 		case o.err != nil:
 			verdict = policy.VerdictWarn
-			lines = append(lines, o.image.Label()+": scan failed")
+			lines = append(lines, o.label()+": scan failed")
 		case o.doc.Summary.Violations > 0:
 			verdict = policy.VerdictWarn
 			lines = append(lines, fmt.Sprintf("%s: %d violations", o.image.Label(), o.doc.Summary.Violations))

@@ -24,13 +24,15 @@ var treeDigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 //	dir:acme-vllm:0.9.1@sha256:<tree digest>   gpu-cluster/inference/vllm
 //
 // Text after the first run of whitespace is a free-text location. Blank
-// lines and lines starting with # are ignored. A malformed directory line
-// is an error that names the line.
+// lines and lines starting with # are ignored. A line that starts with dir:
+// is always a directory. A malformed directory line is reported as a
+// failure that names the line; the other lines are still read.
 type File struct {
 	Path string
 }
 
-// List reads the file.
+// List reads the file. Lines it cannot read are returned in a
+// *PartialError, together with every line it could read.
 func (f File) List(_ context.Context) ([]RunningImage, error) {
 	fh, err := os.Open(f.Path)
 	if err != nil {
@@ -38,20 +40,28 @@ func (f File) List(_ context.Context) ([]RunningImage, error) {
 	}
 	defer fh.Close()
 	out := make([]RunningImage, 0)
+	failures := make([]Failure, 0)
 	sc := bufio.NewScanner(fh)
 	for n := 1; sc.Scan(); n++ {
 		line := strings.TrimSpace(sc.Text())
+		if n == 1 {
+			line = strings.TrimPrefix(line, "\ufeff")
+		}
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 		img, err := parseLine(line, "listed in "+f.Path)
 		if err != nil {
-			return nil, fmt.Errorf("%s line %d: %w", f.Path, n, err)
+			failures = append(failures, Failure{Where: fmt.Sprintf("images file %s line %d", f.Path, n), Err: err})
+			continue
 		}
 		out = append(out, img)
 	}
 	if err := sc.Err(); err != nil {
 		return nil, fmt.Errorf("read image list: %w", err)
+	}
+	if len(failures) > 0 {
+		return out, &PartialError{Failures: failures}
 	}
 	return out, nil
 }
@@ -81,7 +91,7 @@ func parseDirectory(spec, location string) (RunningImage, error) {
 	}
 	if _, _, ok := model.ParseDirectoryReference(ref); !ok {
 		return RunningImage{}, fmt.Errorf("invalid directory %q: use dir:NAME or dir:NAME:VERSION with letters, digits, "+
-			"'.', '_', '-' (and '/' in the name, '+' in the version)", ref)
+			"'.', '_', '-' ('/' between parts of the name, '+' in the version)", ref)
 	}
 	return RunningImage{Reference: ref, Digest: digest, Locations: []string{location}, Directory: true}, nil
 }

@@ -72,6 +72,9 @@ func parseRescanOptions(args []string, stderr io.Writer) (rescanOptions, error) 
 	if err := validateRescanOptions(opts); err != nil {
 		return rescanOptions{}, err
 	}
+	if !slices.Contains(opts.Inventories, "file") && opts.ImagesFile != "" {
+		fmt.Fprintln(stderr, "scanproof: warning: --images-file is only read with --inventory file (for example --inventory kubernetes,file); ignoring it")
+	}
 	if opts.Notify, err = notify.ParseWhen(when); err != nil {
 		return rescanOptions{}, err
 	}
@@ -98,23 +101,23 @@ func parseInventories(v string) ([]string, error) {
 }
 
 func validateRescanOptions(opts rescanOptions) error {
-	withFile := slices.Contains(opts.Inventories, "file")
 	switch {
 	case opts.Store == "":
 		return errors.New("--store is required")
-	case withFile && opts.ImagesFile == "":
+	case slices.Contains(opts.Inventories, "file") && opts.ImagesFile == "":
 		return errors.New("--inventory file needs --images-file")
-	case !withFile && opts.ImagesFile != "":
-		return errors.New("--images-file is only read with --inventory file (for example --inventory kubernetes,file)")
 	case opts.Timeout <= 0:
 		return errors.New("--timeout must be greater than zero")
 	}
 	return nil
 }
 
-// inventorySources returns one source per inventory, listed in order.
-func inventorySources(ctx context.Context, opts rescanOptions) (inventory.Source, error) {
+// inventorySources returns one source per inventory, in order. A source
+// that cannot be set up (for example Kubernetes outside a cluster) is a
+// failure; the others are still used.
+func inventorySources(ctx context.Context, opts rescanOptions) (inventory.Combined, []inventory.Failure) {
 	sources := inventory.Combined{}
+	failures := []inventory.Failure{}
 	for _, name := range opts.Inventories {
 		var s inventory.Source
 		var err error
@@ -127,11 +130,12 @@ func inventorySources(ctx context.Context, opts rescanOptions) (inventory.Source
 			s = inventory.File{Path: opts.ImagesFile}
 		}
 		if err != nil {
-			return nil, err
+			failures = append(failures, inventory.Failure{Where: name + " inventory", Err: err})
+			continue
 		}
-		sources = append(sources, s)
+		sources = append(sources, inventory.NamedSource{Name: name, Source: s})
 	}
-	return sources, nil
+	return sources, failures
 }
 
 func runRescan(ctx context.Context, args []string, env Env) int {
@@ -150,26 +154,29 @@ func runRescan(ctx context.Context, args []string, env Env) int {
 	if err != nil {
 		return fail(env, err)
 	}
-	images, err := listRunning(ctx, opts)
-	if err != nil {
-		return fail(env, err)
-	}
-	outcomes := rescanAll(ctx, opts, env, st, setup, images)
+	images, failures := listRunning(ctx, opts)
+	outcomes := append(inventoryOutcomes(env, failures), rescanAll(ctx, opts, env, st, setup, images)...)
 	sendRescanNotification(ctx, opts, env, outcomes)
 	return finishRescan(env, outcomes, images)
 }
 
-// listRunning lists what runs, merged by digest.
-func listRunning(ctx context.Context, opts rescanOptions) ([]inventory.RunningImage, error) {
-	source, err := inventorySources(ctx, opts)
-	if err != nil {
-		return nil, err
+// listRunning lists what runs, merged by digest, and the sources and lines
+// that could not be read.
+func listRunning(ctx context.Context, opts rescanOptions) ([]inventory.RunningImage, []inventory.Failure) {
+	sources, failures := inventorySources(ctx, opts)
+	found, more := sources.List(ctx)
+	return inventory.Merge(found), append(failures, more...)
+}
+
+// inventoryOutcomes reports each inventory source or line that could not be
+// read as a failed outcome, so the run still exits 2 and the chat lists it.
+func inventoryOutcomes(env Env, failures []inventory.Failure) []rescanOutcome {
+	out := make([]rescanOutcome, 0, len(failures))
+	for _, f := range failures {
+		fmt.Fprintf(env.Stderr, "scanproof: %s: %v\n", f.Where, f.Err)
+		out = append(out, rescanOutcome{where: f.Where, err: f.Err})
 	}
-	found, err := source.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return inventory.Merge(found), nil
+	return out
 }
 
 // finishRescan prints the totals and returns the exit code: 2 when anything
@@ -177,11 +184,12 @@ func listRunning(ctx context.Context, opts rescanOptions) ([]inventory.RunningIm
 func finishRescan(env Env, outcomes []rescanOutcome, images []inventory.RunningImage) int {
 	done, failed := []inventory.RunningImage{}, 0
 	for _, o := range outcomes {
-		if o.err != nil {
+		switch {
+		case o.err != nil:
 			failed++
-			continue
+		case o.where == "":
+			done = append(done, o.image)
 		}
-		done = append(done, o.image)
 	}
 	fmt.Fprintf(env.Stdout, "ScanProof rescan: %s rescanned, %d failed, %s found\n",
 		countPhrase(done, ""), failed, countPhrase(images, "running "))
