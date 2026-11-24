@@ -2,7 +2,6 @@ package summary
 
 import (
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/HowardLee12/scanproof/internal/model"
@@ -33,12 +32,7 @@ func (f TrackedFinding) DaysOpen(end time.Time) float64 {
 // imageName drops the tag and digest, so builds of the same image are
 // compared with each other.
 func imageName(ref string) string {
-	name, _, _ := strings.Cut(ref, "@")
-	slash := strings.LastIndex(name, "/")
-	if colon := strings.LastIndex(name, ":"); colon > slash {
-		name = name[:colon]
-	}
-	return name
+	return model.ImageName(ref)
 }
 
 // track follows every finding that has a deadline: it has a fix available,

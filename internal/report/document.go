@@ -76,12 +76,30 @@ type Document struct {
 	Scanner         model.Scanner                 `json:"scanner"`
 	ScannedAt       time.Time                     `json:"scanned_at"`
 	Context         cicontext.Context             `json:"context"`
+	Runtime         *Runtime                      `json:"runtime,omitempty"`
 	Policy          PolicyInfo                    `json:"policy"`
 	Summary         Summary                       `json:"summary"`
 	Vulnerabilities []policy.VulnerabilityFinding `json:"vulnerabilities"`
 	Secrets         []policy.SecretFinding        `json:"secrets"`
 	Exceptions      Exceptions                    `json:"exceptions"`
 }
+
+// Runtime describes a rescan of a running image.
+type Runtime struct {
+	// Locations are where the image runs, e.g. "k8s gpu/vllm-0".
+	Locations []string `json:"locations"`
+	// Method is "sbom" when the stored SBOM was checked again, or "image"
+	// when the image itself was pulled and scanned.
+	Method string `json:"method"`
+	// SBOMFrom is the report whose SBOM was used.
+	SBOMFrom string `json:"sbom_from,omitempty"`
+}
+
+// Rescan methods.
+const (
+	MethodSBOM  = "sbom"
+	MethodImage = "image"
+)
 
 // Input is everything Build needs.
 type Input struct {
@@ -94,6 +112,7 @@ type Input struct {
 	Policy       policy.Policy
 	PolicySource policy.Source
 	Context      cicontext.Context
+	Runtime      *Runtime
 }
 
 // Build assembles the report document. Findings are sorted with the most
@@ -111,6 +130,7 @@ func Build(in Input) Document {
 		Scanner:     in.Result.Scanner,
 		ScannedAt:   in.Result.ScannedAt,
 		Context:     in.Context,
+		Runtime:     in.Runtime,
 		Policy: PolicyInfo{
 			Mode:         in.Policy.Mode,
 			Source:       in.PolicySource.Label(),

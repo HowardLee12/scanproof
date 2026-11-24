@@ -75,7 +75,7 @@
 #section("Image")
 #kv-table(d.image_rows)
 
-#section("Change being released")
+#section(d.context_title)
 #kv-table(d.context_rows)
 
 #section("Findings")
@@ -134,8 +134,8 @@
 }
 
 #section("Secrets", note: str(d.secrets.len()) + " found")
-#if d.imported {
-  note[These results were imported from an existing Trivy report, so ScanProof could not confirm that secret scanning was enabled.]
+#if d.secrets_note != "" {
+  note(d.secrets_note)
 } else if d.secrets.len() == 0 {
   note[No keys, tokens or passwords were found in image files.]
 }

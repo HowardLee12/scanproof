@@ -38,11 +38,20 @@ func runScan(ctx context.Context, args []string, env Env) int {
 		}
 	}
 
+	setup, err := loadSetup(opts.PolicyPath, opts.Mode, opts.Exceptions)
+	if err != nil {
+		return fail(env, err)
+	}
 	scan, err := scanImage(ctx, opts)
 	if err != nil {
 		return fail(env, err)
 	}
-	doc, err := evaluate(opts, env, scan.Result)
+	ci := cicontext.FromEnv(env.Getenv)
+	trigger := report.TriggerManual
+	if ci.InCI() {
+		trigger = report.TriggerCI
+	}
+	doc, err := buildDocument(env, setup, scan.Result, trigger, ci, nil)
 	if err != nil {
 		return fail(env, err)
 	}
@@ -100,36 +109,39 @@ func importResults(path string) (trivy.Scan, error) {
 	return trivy.Scan{Result: res, Raw: raw}, nil
 }
 
-// evaluate applies the policy and exceptions and builds the report.
-func evaluate(opts scanOptions, env Env, res model.ScanResult) (report.Document, error) {
-	pol, src := policy.Default(), policy.BuiltinSource()
-	if opts.PolicyPath != "" {
+// evalSetup is the policy and exceptions every scan in a run is checked with.
+type evalSetup struct {
+	pol  policy.Policy
+	src  policy.Source
+	excs []exception.Exception
+}
+
+func loadSetup(policyPath string, mode policy.Mode, exceptionsPath string) (evalSetup, error) {
+	setup := evalSetup{pol: policy.Default(), src: policy.BuiltinSource()}
+	if policyPath != "" {
 		var err error
-		if pol, src, err = policy.Load(opts.PolicyPath); err != nil {
-			return report.Document{}, err
+		if setup.pol, setup.src, err = policy.Load(policyPath); err != nil {
+			return evalSetup{}, err
 		}
 	}
-	if opts.Mode != "" {
-		pol = pol.WithMode(opts.Mode)
+	if mode != "" {
+		setup.pol = setup.pol.WithMode(mode)
 	}
-
-	var excs []exception.Exception
-	if opts.Exceptions != "" {
+	if exceptionsPath != "" {
 		var err error
-		if excs, err = exception.Load(opts.Exceptions); err != nil {
-			return report.Document{}, err
+		if setup.excs, err = exception.Load(exceptionsPath); err != nil {
+			return evalSetup{}, err
 		}
 	}
+	return setup, nil
+}
 
+// buildDocument applies the policy and exceptions and builds the report.
+func buildDocument(env Env, setup evalSetup, res model.ScanResult, trigger string, ci cicontext.Context, rt *report.Runtime) (report.Document, error) {
 	now := env.Now().UTC()
 	id, err := report.NewReportID(now, nil)
 	if err != nil {
 		return report.Document{}, err
-	}
-	ci := cicontext.FromEnv(env.Getenv)
-	trigger := report.TriggerManual
-	if ci.InCI() {
-		trigger = report.TriggerCI
 	}
 	return report.Build(report.Input{
 		ReportID:     id,
@@ -137,10 +149,11 @@ func evaluate(opts scanOptions, env Env, res model.ScanResult) (report.Document,
 		Tool:         report.Tool{Name: "scanproof", Version: Version},
 		Trigger:      trigger,
 		Result:       res,
-		Evaluation:   policy.Evaluate(res, pol, excs, now),
-		Policy:       pol,
-		PolicySource: src,
+		Evaluation:   policy.Evaluate(res, setup.pol, setup.excs, now),
+		Policy:       setup.pol,
+		PolicySource: setup.src,
 		Context:      ci,
+		Runtime:      rt,
 	}), nil
 }
 

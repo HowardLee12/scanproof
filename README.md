@@ -66,6 +66,14 @@ scanproof report --store s3://acme-scan-evidence/prod --from 2026-07-01 --to 202
 
 It writes `summary.pdf`, `summary.json`, `summary.md` and `population.csv` (one row per scan, for sampling). Findings are followed from the first scan that reports them to the first later scan of the same image without them, and measured against the `sla_days` in your policy.
 
+To check what is **running now** against today's vulnerability data, run a daily rescan. It finds running images in Kubernetes, Amazon ECS or a list, checks each one's stored SBOM (no image pull), stores the results with the build-time scans, and posts one summary to chat:
+
+```sh
+scanproof rescan --store s3://acme-scan-evidence/prod --inventory kubernetes
+```
+
+**[docs/rescan.md](docs/rescan.md)** has a ready-to-apply Kubernetes CronJob and RBAC rules, and the ECS setup.
+
 **[docs/storage.md](docs/storage.md)** explains how to set up the bucket: Object Lock retention, least-privilege IAM for CI and for the summary job, GitHub OIDC, S3-compatible services and their settings.
 
 ## Policy
@@ -151,6 +159,12 @@ scanproof scan [flags] IMAGE
 In GitHub Actions, ScanProof also appends the summary to the job page, adds a warning or error annotation, and sets the step outputs `verdict`, `report-id`, `violations`, `results`, `evidence-dir` and, with a store, `evidence-url`.
 
 ```
+scanproof rescan --store URL --inventory kubernetes|ecs|file [flags]
+```
+
+See [docs/rescan.md](docs/rescan.md) for the rescan flags.
+
+```
 scanproof report --store URL --from YYYY-MM-DD --to YYYY-MM-DD [flags]
 
   --lookback-days N      also read N days before the period (default 90)
@@ -174,7 +188,6 @@ The PDF maps the report to SOC 2 criteria CC7.1 and CC8.1 for convenience. Your 
 
 ## Roadmap
 
-- Daily rescans of images running in Amazon ECS and Kubernetes, from the stored SBOMs
 - Malware scanning with ClamAV and YARA
 
 ## Development

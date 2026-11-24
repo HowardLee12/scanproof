@@ -4,3 +4,5 @@ scanproof-out
 testdata
 examples
 *.md
+docs
+deploy

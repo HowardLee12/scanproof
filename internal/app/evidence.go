@@ -111,7 +111,23 @@ func uploadEvidence(ctx context.Context, st store.Store, outDir string, doc repo
 	if err := uploadFiles(ctx, st, outDir, prefix, names); err != nil {
 		return "", err
 	}
+	// The digest index lets rescans find this scan's SBOM later.
+	if _, err := store.DigestIndexPrefix(doc.Image.Digest); err == nil {
+		entry := store.IndexEntry{ReportID: doc.ReportID, ScanPrefix: prefix, HasSBOM: contains(names, sbomFile)}
+		if err := store.PutIndexEntry(ctx, st, doc.Image.Digest, entry); err != nil {
+			return "", err
+		}
+	}
 	return st.Location(prefix), nil
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // uploadFiles copies files from dir to the store under prefix, in order.

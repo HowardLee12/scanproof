@@ -81,3 +81,28 @@ func hasRow(rows []pdfRow, label, value string) bool {
 	}
 	return false
 }
+
+func TestPDFViewForRescan(t *testing.T) {
+	doc := sampleDocument(t)
+	doc.Context = cicontext.Context{}
+	doc.Runtime = &Runtime{Locations: []string{"k8s gpu/a", "k8s gpu/b", "k8s gpu/c", "k8s gpu/d", "k8s gpu/e", "k8s gpu/f"},
+		Method: MethodSBOM, SBOMFrom: "SR-20261101-AAAAAA"}
+	doc.Image.SizeBytes = 0
+	v := newPDFView(doc, "")
+	if v.ContextTitle != "Running image" || !hasRow(v.ImageRows, "Size", "1 layer") {
+		t.Errorf("title %q, image rows %+v", v.ContextTitle, v.ImageRows)
+	}
+	if !hasRow(v.ContextRows, "Running in", "k8s gpu/a, k8s gpu/b, k8s gpu/c, k8s gpu/d, k8s gpu/e and 1 more") {
+		t.Errorf("context rows = %+v", v.ContextRows)
+	}
+	if !strings.Contains(v.SecretsNote, "stored SBOM") {
+		t.Errorf("secrets note = %q", v.SecretsNote)
+	}
+	if !strings.Contains(Markdown(doc), "rescan of the stored SBOM SR-20261101-AAAAAA") {
+		t.Error("the job summary should say the SBOM was rescanned")
+	}
+	doc.Runtime.Method = MethodImage
+	if v := newPDFView(doc, ""); !hasRow(v.ContextRows, "Method", "Pulled and scanned the running image") || v.SecretsNote != "" {
+		t.Errorf("image rescan rows = %+v, note %q", v.ContextRows, v.SecretsNote)
+	}
+}

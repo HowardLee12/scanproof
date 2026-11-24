@@ -68,6 +68,9 @@ func scannerDescription(doc Document) string {
 	if doc.Scanner.Imported {
 		desc += " (imported report; secret scanning not verified)"
 	}
+	if doc.Runtime != nil && doc.Runtime.Method == MethodSBOM {
+		desc += " (rescan of the stored SBOM " + doc.Runtime.SBOMFrom + ")"
+	}
 	return desc
 }
 

@@ -21,6 +21,10 @@ Each scan is saved under the UTC day it ran:
     report.pdf        the auditor report (when Typst is available)
     sbom.cdx.json     the image's packages, used by rescans
     manifest.json     SHA-256 of every file above
+
+<prefix>/index/digests/sha256/<digest>/SR-20261124-7F3A9C.json
+                      points from the image digest to the scan, so a rescan
+                      can find the newest SBOM without listing every day
 ```
 
 With `--save`, period summaries are saved next to the scans:
@@ -118,6 +122,8 @@ Give CI and the summary job separate roles, each with only what it needs.
   }]
 }
 ```
+
+Rescans also read and write the digest index that points to stored SBOMs, so give a rescan job `s3:ListBucket` on `prod/index/*` and `prod/scans/*`, `s3:GetObject` on both, and `s3:PutObject` on both.
 
 **Summary role (reads scans, saves summaries)**:
 

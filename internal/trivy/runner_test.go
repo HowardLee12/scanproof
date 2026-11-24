@@ -214,3 +214,43 @@ func dirExists(p string) bool {
 	info, err := os.Stat(p)
 	return err == nil && info.IsDir()
 }
+
+func TestScanSBOMUsesTheSameHardenedFlags(t *testing.T) {
+	var args []string
+	var input []byte
+	exec := func(_ context.Context, _ string, a ...string) ([]byte, error) {
+		if a[0] == "version" {
+			return readFixture(t, "trivy-version.json"), nil
+		}
+		args = a
+		data, err := os.ReadFile(a[len(a)-1])
+		input = data
+		if err != nil {
+			return nil, err
+		}
+		return readFixture(t, "trivy-alpine-3.18.0.json"), nil
+	}
+	scan, err := Runner{Bin: "trivy", Timeout: time.Minute, exec: exec}.ScanSBOM(context.Background(), []byte(`{"bomFormat":"CycloneDX"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := strings.Join(args, " ")
+	for _, want := range []string{"sbom ", "--scanners vuln", "--config " + os.DevNull, "--ignorefile  ", "--ignore-unfixed=false", "--timeout 1m0s"} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("command %q is missing %q", cmd, want)
+		}
+	}
+	if string(input) != `{"bomFormat":"CycloneDX"}` {
+		t.Errorf("trivy should read the SBOM, got %s", input)
+	}
+	if len(scan.Result.Vulnerabilities) != 49 || scan.Result.Scanner.DBUpdatedAt == nil {
+		t.Errorf("unexpected result: %d vulns", len(scan.Result.Vulnerabilities))
+	}
+}
+
+func TestScanSBOMReportsFailure(t *testing.T) {
+	exec := func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("bad sbom") }
+	if _, err := (Runner{Bin: "trivy", exec: exec}).ScanSBOM(context.Background(), []byte("{}")); err == nil {
+		t.Fatal("expected an error")
+	}
+}

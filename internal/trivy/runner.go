@@ -67,22 +67,9 @@ func (r Runner) Scan(ctx context.Context, image string) (Scan, error) {
 		return Scan{}, fmt.Errorf("image reference %q must not start with '-'", image)
 	}
 
-	timeout := r.Timeout
-	if timeout <= 0 {
-		timeout = defaultTimeout
-	}
-	// Settings files in the scanned repository (trivy.yaml, .trivyignore) are
-	// ignored, and the filters are set explicitly, so the only way to accept a
-	// finding is a ScanProof exception with a reason and an expiry date.
-	out, err := r.exec(ctx, r.Bin, "image", "--quiet", "--format", "json",
-		"--scanners", "vuln,secret",
-		"--list-all-pkgs",
-		"--config", os.DevNull,
-		"--ignorefile", "",
-		"--severity", "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL",
-		"--ignore-unfixed=false",
-		"--timeout", timeout.String(),
-		image)
+	args := append([]string{"image", "--quiet", "--format", "json", "--scanners", "vuln,secret", "--list-all-pkgs"},
+		r.hardenedFlags()...)
+	out, err := r.exec(ctx, r.Bin, append(args, image)...)
 	if err != nil {
 		return Scan{}, fmt.Errorf("trivy scan of %s failed: %w", image, err)
 	}
@@ -90,6 +77,49 @@ func (r Runner) Scan(ctx context.Context, image string) (Scan, error) {
 	if err != nil {
 		return Scan{}, err
 	}
+	return Scan{Result: r.withDatabaseInfo(ctx, res), Raw: out}, nil
+}
+
+// hardenedFlags ignore settings files in the scanned repository (trivy.yaml,
+// .trivyignore) and set every filter explicitly, so the only way to accept a
+// finding is a ScanProof exception with a reason and an expiry date.
+func (r Runner) hardenedFlags() []string {
+	timeout := r.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+	return []string{
+		"--config", os.DevNull,
+		"--ignorefile", "",
+		"--severity", "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL",
+		"--ignore-unfixed=false",
+		"--timeout", timeout.String(),
+	}
+}
+
+// ScanSBOM checks a stored CycloneDX SBOM against today's vulnerability
+// database. It finds new vulnerabilities without pulling the image, but it
+// cannot look for secrets. The caller sets the image reference and digest.
+func (r Runner) ScanSBOM(ctx context.Context, sbom []byte) (Scan, error) {
+	dir, err := os.MkdirTemp("", "scanproof-rescan-")
+	if err != nil {
+		return Scan{}, fmt.Errorf("create rescan work directory: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "sbom.cdx.json")
+	if err := os.WriteFile(path, sbom, 0o600); err != nil {
+		return Scan{}, fmt.Errorf("write SBOM: %w", err)
+	}
+	args := append([]string{"sbom", "--quiet", "--format", "json", "--scanners", "vuln"}, r.hardenedFlags()...)
+	out, err := r.exec(ctx, r.Bin, append(args, path)...)
+	if err != nil {
+		return Scan{}, fmt.Errorf("trivy SBOM scan failed: %w", err)
+	}
+	res, err := Parse(bytes.NewReader(out))
+	if err != nil {
+		return Scan{}, err
+	}
+	res.Image.Reference = ""
 	return Scan{Result: r.withDatabaseInfo(ctx, res), Raw: out}, nil
 }
 
