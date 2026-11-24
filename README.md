@@ -96,6 +96,7 @@ fail_on:
   fixable_only: true  # only count vulnerabilities that have a fix
   secrets: true       # count every embedded secret
   malware: true       # count every malware detection (with --malware)
+  unscanned_files: true  # count files the malware scan could not fully read
 sla_days:             # remediation deadlines used by period summaries
   critical: 15
   high: 30
@@ -163,6 +164,7 @@ scanproof scan [flags] IMAGE
   --clamav-db DIR        ClamAV signature directory or file
   --clamav-update        run freshclam before the malware scan
   --malware-max-file-mb  skip larger files, listed in the report (default 512)
+  --platform OS/ARCH     image platform for multi-platform images
   --notify WHEN          violation | always | never (default violation)
   --trivy-results FILE   use an existing Trivy JSON report
   --trivy PATH           trivy binary (default trivy)
@@ -199,12 +201,12 @@ The PDF maps the report to SOC 2 criteria CC7.1 and CC8.1 for convenience. Your 
 - Secret findings record the rule, file and line only. The matched text is never stored or printed.
 - Values from scan results are passed to the PDF template as data, never as template code.
 - The image pins Trivy by digest and verifies the Typst download by SHA-256.
-- The malware scan unpacks only regular files, resolves every path inside a private temporary directory, and deletes it afterwards.
+- The malware scan unpacks every layer's regular files under generated names in a private temporary directory, so names from the image never reach the file system or scanner output. It checks that the scanner covered every file, and deletes the directory after each layer.
 
 ## Roadmap
 
-- Malware scanning of each layer, including files deleted in later layers
 - GitLab CI template
+- Malware checks in rescans of pulled images
 
 ## Development
 

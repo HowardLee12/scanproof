@@ -47,6 +47,7 @@ type pdfView struct {
 	MalwareStats      string     `json:"malware_stats"`
 	MalwareFindings   [][]string `json:"malware_findings"`
 	MalwareSkipped    [][]string `json:"malware_skipped"`
+	CC68Text          string     `json:"cc68_text"`
 }
 
 type pdfRow struct {
@@ -123,6 +124,7 @@ func newPDFView(doc Document, resultsSHA256 string) pdfView {
 		MalwareStats:      malwareStats(doc.Malware),
 		MalwareFindings:   malwareFindings(doc.Malware),
 		MalwareSkipped:    malwareSkipped(doc.Malware),
+		CC68Text:          cc68Text(doc.Malware),
 	}
 }
 
@@ -427,7 +429,9 @@ func malwareStats(m *MalwareSection) string {
 	if m == nil {
 		return ""
 	}
-	stats := fmt.Sprintf("Scanned %d files (%s) from the flattened image filesystem.", m.FilesScanned, formatBytes(m.BytesScanned))
+	stats := fmt.Sprintf("Scanned %d files (%s) in %s of image %s, read from the %s. "+
+		"Every layer is scanned, so files that a later layer deletes are checked too.",
+		m.FilesScanned, formatBytes(m.BytesScanned), plural(m.Layers, "layer", "layers"), shortDigest(m.ConfigDigest), m.ImageSource)
 	if len(m.Skipped) > 0 {
 		stats += fmt.Sprintf(" %s not scanned and %s listed below.", plural(len(m.Skipped), "file was", "files were"),
 			map[bool]string{true: "is", false: "are"}[len(m.Skipped) == 1])
@@ -441,7 +445,7 @@ func malwareFindings(m *MalwareSection) [][]string {
 	}
 	rows := make([][]string, 0, len(m.Findings))
 	for _, f := range m.Findings {
-		rows = append(rows, []string{f.Engine, f.Signature, f.Path, findingStatus(f.ExceptionID, f.Violation)})
+		rows = append(rows, []string{f.Engine, f.Signature, f.Path, strconv.Itoa(f.Layer), findingStatus(f.ExceptionID, f.Violation)})
 	}
 	return rows
 }
@@ -453,10 +457,10 @@ func malwareSkipped(m *MalwareSection) [][]string {
 	rows := make([][]string, 0, maxSkippedRows)
 	for i, f := range m.Skipped {
 		if i == maxSkippedRows {
-			rows = append(rows, []string{fmt.Sprintf("%d more in results.json", len(m.Skipped)-maxSkippedRows), "", ""})
+			rows = append(rows, []string{fmt.Sprintf("%d more in results.json", len(m.Skipped)-maxSkippedRows), "", "", ""})
 			break
 		}
-		rows = append(rows, []string{f.Path, formatBytes(f.Bytes), f.Reason})
+		rows = append(rows, []string{f.Path, strconv.Itoa(f.Layer), orText(formatBytes(f.Bytes), "—"), f.Reason})
 	}
 	return rows
 }
@@ -469,4 +473,15 @@ func shortHashes(s string) string {
 		return s
 	}
 	return before + "sha256:" + hash[:12] + "…"
+}
+
+func cc68Text(m *MalwareSection) string {
+	if m == nil {
+		return ""
+	}
+	if len(m.Skipped) > 0 {
+		return fmt.Sprintf("Every layer of the image was scanned for malware with the engines and signature versions shown above. %s could not be fully scanned and %s listed in the malware section.",
+			plural(len(m.Skipped), "file", "files"), map[bool]string{true: "is", false: "are"}[len(m.Skipped) == 1])
+	}
+	return "Every file in every layer of the image was scanned for malware with the engines and signature versions shown above."
 }

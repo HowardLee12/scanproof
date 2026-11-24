@@ -67,23 +67,30 @@ type MalwareEngine struct {
 	DatabaseDate string `json:"database_date,omitempty"`
 }
 
-// MalwareDetection is one file one engine flagged.
+// MalwareDetection is one file one engine flagged. Layer is the 1-based
+// image layer the file came from.
 type MalwareDetection struct {
 	Path      string `json:"path"`
+	Layer     int    `json:"layer"`
 	Engine    string `json:"engine"`
 	Signature string `json:"signature"`
 }
 
-// SkippedFile is a file the malware scan did not read, and why.
+// SkippedFile is a file the malware scan did not fully read, and why.
 type SkippedFile struct {
 	Path   string `json:"path"`
+	Layer  int    `json:"layer"`
 	Bytes  int64  `json:"bytes"`
 	Reason string `json:"reason"`
 }
 
-// MalwareScan is the result of scanning the image's files for malware.
+// MalwareScan is the result of scanning every file of every image layer.
 type MalwareScan struct {
 	Engines      []MalwareEngine    `json:"engines"`
+	ImageSource  string             `json:"image_source"`
+	ConfigDigest string             `json:"config_digest"`
+	Platform     string             `json:"platform,omitempty"`
+	Layers       int                `json:"layers"`
 	FilesScanned int                `json:"files_scanned"`
 	BytesScanned int64              `json:"bytes_scanned"`
 	Skipped      []SkippedFile      `json:"skipped"`

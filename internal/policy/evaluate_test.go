@@ -177,10 +177,19 @@ func TestMalwareDetectionsAreViolationsUnlessAccepted(t *testing.T) {
 	if ev.Malware[0].ExceptionID != "EX-M" || ev.Malware[0].Violation || !ev.Malware[1].Violation {
 		t.Errorf("findings = %+v", ev.Malware)
 	}
-	rule := ev.Rules[len(ev.Rules)-1]
-	if rule.Name != "No malware detections" || rule.Found != 1 || rule.Passed {
+	rule := ruleNamed(ev, "No malware detections")
+	if rule.Found != 1 || rule.Passed {
 		t.Errorf("rule = %+v", rule)
 	}
+}
+
+func ruleNamed(ev Evaluation, name string) RuleResult {
+	for _, r := range ev.Rules {
+		if r.Name == name {
+			return r
+		}
+	}
+	return RuleResult{}
 }
 
 func TestNoMalwareRuleWithoutAMalwareScan(t *testing.T) {
@@ -199,5 +208,26 @@ func TestMalwareCanBeReportOnly(t *testing.T) {
 	res := model.ScanResult{Malware: &model.MalwareScan{Detections: []model.MalwareDetection{{Path: "/x", Signature: "S"}}}}
 	if ev := Evaluate(res, p, nil, now); ev.Verdict != VerdictPass || ev.Malware[0].Violation {
 		t.Fatalf("with malware: false a detection is reported but not a violation: %+v", ev)
+	}
+}
+
+func TestUnscannedFilesAreViolationsByDefault(t *testing.T) {
+	res := model.ScanResult{Malware: &model.MalwareScan{Skipped: []model.SkippedFile{
+		{Path: "/models/weights.bin", Layer: 3, Bytes: 9 << 30, Reason: "larger than the file size limit"},
+	}}}
+	ev := Evaluate(res, Default(), nil, now)
+	if ev.Verdict != VerdictWarn {
+		t.Fatalf("verdict = %s", ev.Verdict)
+	}
+	rule := ev.Rules[len(ev.Rules)-1]
+	if rule.Name != "Every file scanned for malware" || rule.Found != 1 || rule.Passed {
+		t.Errorf("rule = %+v", rule)
+	}
+	p, err := Parse([]byte("fail_on:\n  unscanned_files: false\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ev := Evaluate(res, p, nil, now); ev.Verdict != VerdictPass {
+		t.Errorf("with unscanned_files: false the files are only listed, got %s", ev.Verdict)
 	}
 }

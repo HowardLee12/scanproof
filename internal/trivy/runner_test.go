@@ -254,3 +254,13 @@ func TestScanSBOMReportsFailure(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
+
+func TestRunnerPassesPlatform(t *testing.T) {
+	fake := &fakeExec{outputs: map[string][]byte{"image": readFixture(t, "trivy-alpine-3.18.0.json")}}
+	if _, err := (Runner{Bin: "trivy", Platform: "linux/arm64", exec: fake.run}).Scan(context.Background(), "alpine:3.18.0"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(fake.calls[0], " "), "--platform linux/arm64 alpine:3.18.0") {
+		t.Errorf("command = %v", fake.calls[0])
+	}
+}

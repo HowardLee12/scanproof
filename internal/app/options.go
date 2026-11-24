@@ -26,6 +26,7 @@ type scanOptions struct {
 	TrivyBin     string
 	TypstBin     string
 	Timeout      time.Duration
+	Platform     string
 	Malware      malwareOptions
 }
 
@@ -58,7 +59,8 @@ func parseScanOptions(args []string, stderr io.Writer) (scanOptions, error) {
 	fs.StringVar(&opts.TrivyResults, "trivy-results", "", "use an existing Trivy JSON report instead of running Trivy")
 	fs.StringVar(&opts.TrivyBin, "trivy", "trivy", "path to the trivy binary")
 	fs.StringVar(&opts.TypstBin, "typst", "typst", "path to the typst binary")
-	fs.DurationVar(&opts.Timeout, "timeout", 30*time.Minute, "maximum time for the scan")
+	fs.DurationVar(&opts.Timeout, "timeout", 30*time.Minute, "maximum time for the whole scan")
+	fs.StringVar(&opts.Platform, "platform", "", "image platform for multi-platform images, e.g. linux/arm64 (default: this machine's)")
 	fs.BoolVar(&opts.Malware.Enabled, "malware", false, "also scan every file in the image for malware (needs clamscan)")
 	fs.StringVar(&opts.Malware.ClamscanBin, "clamscan", "clamscan", "path to the clamscan binary")
 	fs.StringVar(&opts.Malware.ClamAVDB, "clamav-db", "", "ClamAV signature directory (default: clamscan's own)")

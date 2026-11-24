@@ -50,12 +50,19 @@ func runScan(ctx context.Context, args []string, env Env) int {
 	if err != nil {
 		return fail(env, err)
 	}
-	scan, err := scanImage(ctx, opts)
+	// One deadline for the whole scan. Trivy gets the same limit, so it can
+	// report its own timeout before this context ends.
+	scanCtx, cancel := context.WithTimeout(ctx, opts.Timeout+time.Minute)
+	defer cancel()
+	scan, err := scanImage(scanCtx, opts)
 	if err != nil {
 		return fail(env, err)
 	}
 	if opts.Malware.Enabled {
-		if scan.Result.Malware, err = scanMalware(ctx, opts, env); err != nil {
+		if scan.Result.Malware, err = scanMalware(scanCtx, opts, env); err != nil {
+			return fail(env, err)
+		}
+		if err := sameImage(scan.Result.Image.ImageID, scan.Result.Malware.ConfigDigest); err != nil {
 			return fail(env, err)
 		}
 	}
@@ -98,11 +105,20 @@ func scanImage(ctx context.Context, opts scanOptions) (trivy.Scan, error) {
 	if opts.TrivyResults != "" {
 		return importResults(opts.TrivyResults)
 	}
-	// The context gets a little longer than Trivy's own timeout, so Trivy can
-	// report its timeout error instead of being killed.
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout+time.Minute)
-	defer cancel()
-	return trivy.NewRunner(opts.TrivyBin, opts.Timeout).Scan(ctx, opts.Image)
+	runner := trivy.NewRunner(opts.TrivyBin, opts.Timeout)
+	runner.Platform = opts.Platform
+	return runner.Scan(ctx, opts.Image)
+}
+
+// sameImage makes sure the vulnerability and malware scans looked at the same
+// image (the local daemon and the registry can hold different images under
+// one tag, and multi-platform images have one image per platform).
+func sameImage(trivyImageID, malwareConfig string) error {
+	if trivyImageID == "" || malwareConfig == "" || trivyImageID == malwareConfig {
+		return nil
+	}
+	return fmt.Errorf("the malware scan read image %s but the vulnerability scan read %s; "+
+		"set --platform, or pull the image so the Docker daemon and the registry agree", malwareConfig, trivyImageID)
 }
 
 // scanMalware unpacks the image and runs ClamAV (and YARA when rules are
@@ -112,18 +128,22 @@ func scanMalware(ctx context.Context, opts scanOptions, env Env) (*model.Malware
 	if m.Update {
 		updateSignatures(ctx, m, env)
 	}
+	if m.WorkDir != "" {
+		// The Docker daemon export is buffered in a temporary file; keep it
+		// on the disk chosen for the scan.
+		os.Setenv("TMPDIR", m.WorkDir)
+	}
 	scanner := malware.Scanner{
 		ClamAV:       malware.NewClamAV(m.ClamscanBin, m.ClamAVDB),
 		MaxFileBytes: m.MaxFileMB << 20,
 		TryDaemon:    m.DockerDaemon,
 		WorkDir:      m.WorkDir,
+		Platform:     opts.Platform,
 	}
 	if m.YaraRules != "" {
 		y := malware.NewYara(m.YaraBin, m.YaraRules)
 		scanner.Yara = &y
 	}
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
-	defer cancel()
 	result, err := scanner.Scan(ctx, opts.Image)
 	if err != nil {
 		return nil, fmt.Errorf("malware scan: %w", err)

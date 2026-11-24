@@ -40,15 +40,20 @@ COPY --from=build /out/scanproof /usr/local/bin/scanproof
 ENTRYPOINT ["scanproof"]
 CMD ["--help"]
 
-# The "full" image adds ClamAV and YARA for --malware. CLAMAV_DB=download
-# bakes the current ClamAV signatures into the image (release builds);
+# ClamAV signatures are downloaded once, on the build machine's own
+# platform, and copied into every platform's image: one download per build,
+# and the same signature version for amd64 and arm64.
 # CLAMAV_DB=none leaves them out (CI, or when you mount your own).
-FROM base AS full
+FROM --platform=$BUILDPLATFORM alpine:3.22 AS clamdb
 ARG CLAMAV_DB=download
-RUN apk add --no-cache clamav clamav-libunrar yara \
- && mkdir -p /var/lib/clamav \
- && chown -R clamav:clamav /var/lib/clamav \
- && if [ "$CLAMAV_DB" = "download" ]; then freshclam --stdout --no-warnings; fi
+RUN apk add --no-cache clamav \
+ && mkdir -p /db && chown clamav:clamav /db \
+ && if [ "$CLAMAV_DB" = "download" ]; then freshclam --stdout --no-warnings --datadir=/db; fi
+
+# The "full" image adds ClamAV and YARA for --malware.
+FROM base AS full
+RUN apk add --no-cache clamav clamav-libunrar yara && mkdir -p /var/lib/clamav
+COPY --from=clamdb --chown=clamav:clamav /db/ /var/lib/clamav/
 
 # The default image: Trivy, Typst and ScanProof, without malware engines.
 FROM base AS default

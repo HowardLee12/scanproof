@@ -42,7 +42,9 @@ var allowedTrivyEnv = map[string]bool{
 type Runner struct {
 	Bin     string
 	Timeout time.Duration
-	exec    execFunc
+	// Platform selects one image of a multi-platform index, e.g. linux/arm64.
+	Platform string
+	exec     execFunc
 }
 
 // NewRunner returns a Runner that executes the Trivy binary at bin.
@@ -69,6 +71,9 @@ func (r Runner) Scan(ctx context.Context, image string) (Scan, error) {
 
 	args := append([]string{"image", "--quiet", "--format", "json", "--scanners", "vuln,secret", "--list-all-pkgs"},
 		r.hardenedFlags()...)
+	if r.Platform != "" {
+		args = append(args, "--platform", r.Platform)
+	}
 	out, err := r.exec(ctx, r.Bin, append(args, image)...)
 	if err != nil {
 		return Scan{}, fmt.Errorf("trivy scan of %s failed: %w", image, err)

@@ -104,17 +104,18 @@ func writeMalware(b *strings.Builder, m *MalwareSection) {
 	for _, e := range m.Engines {
 		engines = append(engines, engineLabel(e))
 	}
-	fmt.Fprintf(b, "### Malware\n\nScanned %d files (%s) with %s. %s.\n\n", m.FilesScanned, formatBytes(m.BytesScanned),
-		strings.Join(engines, " and "), plural(len(m.Findings), "detection", "detections"))
+	fmt.Fprintf(b, "### Malware\n\nScanned %d files (%s) in %s with %s. %s.\n\n", m.FilesScanned, formatBytes(m.BytesScanned),
+		plural(m.Layers, "layer", "layers"), strings.Join(engines, " and "), plural(len(m.Findings), "detection", "detections"))
 	if len(m.Findings) > 0 {
-		b.WriteString("| Engine | Signature | File | Status |\n|---|---|---|---|\n")
+		b.WriteString("| Engine | Signature | File | Layer | Status |\n|---|---|---|---:|---|\n")
 		for _, f := range m.Findings {
-			fmt.Fprintf(b, "| %s | %s | %s | %s |\n", cell(f.Engine), cell(f.Signature), cell(f.Path), findingStatus(f.ExceptionID, f.Violation))
+			fmt.Fprintf(b, "| %s | %s | %s | %d | %s |\n", cell(f.Engine), cell(f.Signature), cell(f.Path), f.Layer,
+				findingStatus(f.ExceptionID, f.Violation))
 		}
 		b.WriteString("\n")
 	}
 	if len(m.Skipped) > 0 {
-		fmt.Fprintf(b, "%s not scanned because of the size limit or a write error; see results.json.\n\n",
+		fmt.Fprintf(b, "%s not fully scanned (size limit or a ClamAV limit); see results.json.\n\n",
 			plural(len(m.Skipped), "file was", "files were"))
 	}
 }

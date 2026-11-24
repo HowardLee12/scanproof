@@ -13,6 +13,9 @@ fail_on:
   secrets: true
   # Count every malware detection as a violation (when --malware is used).
   malware: true
+  # Count every file the malware scan could not fully read (larger than
+  # --malware-max-file-mb, or past a ClamAV limit) as a violation.
+  unscanned_files: true
 
 # Days to fix a vulnerability after it is first found with a fix available.
 # Period summaries report remediation against these deadlines. 0 = no deadline.

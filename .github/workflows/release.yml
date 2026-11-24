@@ -34,7 +34,7 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.image }}:${{ github.ref_name }}
             ${{ steps.meta.outputs.image }}:latest
-      - name: Push the full image (ClamAV and YARA, signatures as of the release)
+      - name: Push the full image (ClamAV and YARA, signatures as of the release, downloaded once)
         uses: docker/build-push-action@v6
         with:
           context: .

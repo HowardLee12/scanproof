@@ -151,10 +151,12 @@
   if d.malware_findings.len() == 0 {
     note[No malware was detected.]
   } else {
-    data-table((22mm, 1fr, 1fr, 30mm), ("Engine", "Signature", "File", "Status"), d.malware_findings)
+    data-table((20mm, 1fr, 1fr, 12mm, 28mm), ("Engine", "Signature", "File", "Layer", "Status"), d.malware_findings,
+      aligns: (left, left, left, right, left))
   }
   if d.malware_skipped.len() > 0 {
-    data-table((1fr, 20mm, 60mm), ("Not scanned", "Size", "Reason"), d.malware_skipped, aligns: (left, right, left))
+    data-table((1fr, 12mm, 18mm, 60mm), ("Not fully scanned", "Layer", "Size", "Reason"), d.malware_skipped,
+      aligns: (left, right, right, left))
   }
 }
 
@@ -185,7 +187,7 @@
   ("Criteria", "Requirement", "What this report shows"),
   (
     ..if d.malware {
-      (("CC6.8", "Prevent or detect and act upon unauthorized or malicious software.", "Every file in the image was scanned for malware with the engines and signature versions shown above."),)
+      (("CC6.8", "Prevent or detect and act upon unauthorized or malicious software.", d.cc68_text),)
     } else { () },
     ("CC7.1", "Detect new vulnerabilities and configuration changes that introduce them.", "Known vulnerabilities were identified against a vulnerability database with the update time shown above."),
     ("CC8.1", "Changes are tested and approved before they are implemented.", "The scan ran in the pipeline for the change shown above, and the policy result was recorded before deployment."),

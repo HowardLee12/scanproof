@@ -119,6 +119,11 @@ func Evaluate(res model.ScanResult, p Policy, excs []exception.Exception, now ti
 	if res.Malware != nil && p.BlockMalware {
 		rules = append(rules, newRule("No malware detections", malwareViolations))
 	}
+	unscanned := 0
+	if res.Malware != nil && p.BlockUnscanned {
+		unscanned = len(res.Malware.Skipped)
+		rules = append(rules, newRule("Every file scanned for malware", unscanned))
+	}
 
 	applied, expired, unused := tracker.summary()
 	return Evaluation{
@@ -129,7 +134,7 @@ func Evaluate(res model.ScanResult, p Policy, excs []exception.Exception, now ti
 		Expired:         expired,
 		Unused:          unused,
 		Rules:           rules,
-		Verdict:         verdict(p.Mode, vulnViolations+secretViolations+malwareViolations),
+		Verdict:         verdict(p.Mode, vulnViolations+secretViolations+malwareViolations+unscanned),
 	}
 }
 
