@@ -374,20 +374,14 @@ func TestInvalidStoreFailsBeforeScanning(t *testing.T) {
 }
 
 func TestStoreWriteFailureIsAnError(t *testing.T) {
-	storeDir := t.TempDir()
+	// The store path is below a regular file, so every write fails, even
+	// for root, which ignores directory permissions.
+	notADir := filepath.Join(t.TempDir(), "file")
+	writeFile(t, notADir, "x")
 	h := newHarness()
-	args := []string{"scan", "--trivy", fakeTrivy(t), "--pdf=false", "--sbom=false", "--store", "file://" + storeDir}
-	if code := h.run(append(args, "--out", t.TempDir(), "--", "alpine:3.18.0")...); code != 0 {
-		t.Fatalf("first run: %d %s", code, h.stderr.String())
-	}
-	// Make the day directory read-only so the next upload fails.
-	day := filepath.Join(storeDir, "scans", "2026", "11", "24")
-	if err := os.Chmod(day, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.Chmod(day, 0o755) })
-	h = newHarness()
-	if code := h.run(append(args, "--out", t.TempDir(), "--", "alpine:3.18.0")...); code != ExitError {
+	code := h.run("scan", "--trivy", fakeTrivy(t), "--pdf=false", "--sbom=false", "--store", "file://"+filepath.Join(notADir, "store"),
+		"--out", t.TempDir(), "--", "alpine:3.18.0")
+	if code != ExitError {
 		t.Fatalf("an evidence upload failure must fail the step, got %d", code)
 	}
 }

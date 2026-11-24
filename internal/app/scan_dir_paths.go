@@ -73,8 +73,12 @@ func resolvePath(p string) string {
 	}
 }
 
-// inside reports whether p is root or below it.
+// inside reports whether p is root or below it. On macOS and Windows file
+// systems usually ignore case, so the comparison does too.
 func inside(root, p string) bool {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		root, p = strings.ToLower(root), strings.ToLower(p)
+	}
 	rel, err := filepath.Rel(root, p)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

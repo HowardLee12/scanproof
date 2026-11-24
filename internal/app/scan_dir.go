@@ -36,6 +36,9 @@ func scanDirectory(ctx context.Context, opts scanOptions, env Env) (trivy.Scan, 
 	if err != nil {
 		return trivy.Scan{}, err
 	}
+	if err := tree.CheckRoot(root, before); err != nil {
+		return trivy.Scan{}, fmt.Errorf("%s: %w", root, err)
+	}
 	malware, after, err := readDirectoryAgain(ctx, opts, env, root)
 	if err != nil {
 		return trivy.Scan{}, err

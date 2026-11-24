@@ -38,6 +38,7 @@ func runScan(ctx context.Context, args []string, env Env) int {
 		return fail(env, err)
 	}
 	doc := done.doc
+	writeGitHubStepSummary(env, doc.Context.StepSummaryPath, report.Markdown(doc))
 	writeGitHubOutputs(env, doc, opts.OutDir, done.location)
 	sendNotifications(ctx, opts, env, doc)
 	announce(env, doc, opts.OutDir, done.location)
@@ -87,24 +88,11 @@ func scanAndStore(ctx context.Context, opts scanOptions, env Env) (scanned, erro
 		return scanned{}, err
 	}
 	written, err := writeEvidence(ctx, opts, env, doc, scan.Raw)
-	if err == nil {
-		err = requireSBOM(opts, st, written)
-	}
 	if err != nil || st == nil {
 		return scanned{doc: doc}, err
 	}
 	location, err := uploadEvidence(ctx, st, opts.OutDir, doc, written)
 	return scanned{doc: doc, location: location, indexed: contains(written, sbomFile)}, err
-}
-
-// requireSBOM stops a stored directory scan whose SBOM could not be
-// written: a rescan can only ever check a directory through its SBOM.
-func requireSBOM(opts scanOptions, st store.Store, written []string) error {
-	if opts.Dir.Enabled && st != nil && opts.SBOM && !contains(written, sbomFile) {
-		return errors.New("the directory's SBOM could not be written (see the warning above), so scanproof rescan " +
-			"could never check it; nothing was stored")
-	}
-	return nil
 }
 
 func scanTrigger(ci cicontext.Context) string {
