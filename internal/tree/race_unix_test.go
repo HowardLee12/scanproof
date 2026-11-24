@@ -130,3 +130,26 @@ func TestDigestRefusesNamesThatAreNotUTF8(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestDigestDoesNotHangOnARootSwappedForANamedPipe(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "venv")
+	mustWrite(t, filepath.Join(root, "a"), "x", 0o644)
+	testHookBeforeOpenRoot = func(p string) {
+		mustRun(t, os.RemoveAll(p))
+		mustRun(t, syscall.Mkfifo(p, 0o644))
+	}
+	t.Cleanup(func() { testHookBeforeOpenRoot = nil })
+	done := make(chan error, 1)
+	go func() {
+		_, err := Digest(context.Background(), root, nil)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a named pipe is not a directory")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Digest hung on a named pipe")
+	}
+}

@@ -74,7 +74,8 @@ func readDirNames(r *os.Root, dir string, listed *Entry) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", dir, err)
 		}
-		if st := stampOf(info); !info.IsDir() || st.Dev != listed.Stamp.Dev || st.Ino != listed.Stamp.Ino {
+		// os.SameFile also works where the stamp has no device and inode.
+		if st := stampOf(info); !info.IsDir() || !os.SameFile(info, listed.info) || st.Dev != listed.Stamp.Dev || st.Ino != listed.Stamp.Ino {
 			return nil, changed(dir)
 		}
 	}

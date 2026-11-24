@@ -70,6 +70,9 @@ type Result struct {
 	Dirs     int
 	Symlinks int
 	Bytes    int64
+	// Root is the stamp of the root directory itself, so a root that was
+	// swapped for another directory and put back is noticed.
+	Root Stamp
 	// Entries are every entry, sorted by path.
 	Entries []Entry
 }
@@ -126,7 +129,7 @@ func ResolveRoot(path string) (string, error) {
 // caller can process exactly the bytes the digest covers. Every read goes
 // through an os.Root, so nothing outside root is ever opened.
 func Digest(ctx context.Context, root string, content ContentFunc) (Result, error) {
-	r, err := openRoot(root)
+	r, rootStamp, err := openRoot(root)
 	if err != nil {
 		return Result{}, err
 	}
@@ -137,7 +140,7 @@ func Digest(ctx context.Context, root string, content ContentFunc) (Result, erro
 	}
 	h := sha256.New()
 	io.WriteString(h, Algorithm+"\x00")
-	res := Result{Entries: entries}
+	res := Result{Root: rootStamp, Entries: entries}
 	for _, e := range entries {
 		sum := ""
 		if e.Type == File {
@@ -156,6 +159,9 @@ func Digest(ctx context.Context, root string, content ContentFunc) (Result, erro
 // same digest, and the same entries with the same stamps. It returns an
 // ErrChanged error naming the first difference.
 func Unchanged(before, after Result) error {
+	if before.Root != after.Root {
+		return changed("the directory itself")
+	}
 	for i, a := range before.Entries {
 		if i >= len(after.Entries) || after.Entries[i].Path != a.Path {
 			return changed(a.Path)
@@ -174,19 +180,46 @@ func Unchanged(before, after Result) error {
 	return nil
 }
 
-func openRoot(root string) (*os.Root, error) {
+// CheckRoot reports whether the directory at root is still the one a read
+// found: the same device, inode and times.
+func CheckRoot(root string, read Result) error {
 	info, err := os.Lstat(root)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", root, err)
+		return openError("the directory itself", err)
+	}
+	if !info.IsDir() || stampOf(info) != read.Root {
+		return changed("the directory itself")
+	}
+	return nil
+}
+
+// testHookBeforeOpenRoot lets tests replace the root after it was checked.
+var testHookBeforeOpenRoot func(root string)
+
+// openRoot opens the directory at root and returns its stamp. The path is
+// opened as root/. so that, if it was replaced by a named pipe after the
+// check, the open fails at once instead of waiting for a writer.
+func openRoot(root string) (*os.Root, Stamp, error) {
+	info, err := os.Lstat(root)
+	if err != nil {
+		return nil, Stamp{}, fmt.Errorf("read %s: %w", root, err)
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("%s is not a directory", root)
+		return nil, Stamp{}, fmt.Errorf("%s is not a directory", root)
 	}
-	r, err := os.OpenRoot(root)
+	if testHookBeforeOpenRoot != nil {
+		testHookBeforeOpenRoot(root)
+	}
+	r, err := os.OpenRoot(root + string(os.PathSeparator) + ".")
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", root, err)
+		return nil, Stamp{}, fmt.Errorf("open %s: %w", root, err)
 	}
-	return r, nil
+	opened, err := r.Stat(".")
+	if err != nil || !os.SameFile(info, opened) {
+		r.Close()
+		return nil, Stamp{}, changed("the directory itself")
+	}
+	return r, stampOf(opened), nil
 }
 
 // record encodes one entry. Every field ends with a NUL byte, which cannot
