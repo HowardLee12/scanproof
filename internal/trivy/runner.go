@@ -90,8 +90,13 @@ func (r Runner) ScanRootfs(ctx context.Context, path string) (Scan, error) {
 // scanArtifact runs one `trivy image` or `trivy rootfs` scan with every
 // package listed, which the SBOM for later rescans needs.
 func (r Runner) scanArtifact(ctx context.Context, mode, target string, extra []string) (Scan, error) {
+	settings, err := os.MkdirTemp("", "scanproof-trivy-")
+	if err != nil {
+		return Scan{}, fmt.Errorf("create trivy settings directory: %w", err)
+	}
+	defer os.RemoveAll(settings)
 	args := append([]string{mode, "--quiet", "--format", "json", "--scanners", "vuln,secret", "--list-all-pkgs"},
-		r.hardenedFlags()...)
+		r.hardenedFlags(settings)...)
 	args = append(args, extra...)
 	out, err := r.exec(ctx, r.Bin, append(args, target)...)
 	if err != nil {
@@ -104,10 +109,13 @@ func (r Runner) scanArtifact(ctx context.Context, mode, target string, extra []s
 	return Scan{Result: r.withDatabaseInfo(ctx, res), Raw: out}, nil
 }
 
-// hardenedFlags ignore settings files in the scanned repository (trivy.yaml,
-// .trivyignore) and set every filter explicitly, so the only way to accept a
-// finding is a ScanProof exception with a reason and an expiry date.
-func (r Runner) hardenedFlags() []string {
+// hardenedFlags ignore Trivy settings files in the working directory
+// (trivy.yaml, .trivyignore, trivy-secret.yaml) and set every filter
+// explicitly, so the only way to accept a finding is a ScanProof exception
+// with a reason and an expiry date. The secret scanner's settings file is
+// pinned to a path in the private, empty directory dir, which cannot exist,
+// so Trivy uses its built-in secret rules.
+func (r Runner) hardenedFlags(dir string) []string {
 	timeout := r.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout
@@ -115,6 +123,7 @@ func (r Runner) hardenedFlags() []string {
 	return []string{
 		"--config", os.DevNull,
 		"--ignorefile", "",
+		"--secret-config", filepath.Join(dir, "trivy-secret.yaml"),
 		"--severity", "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL",
 		"--ignore-unfixed=false",
 		"--timeout", timeout.String(),
@@ -134,7 +143,7 @@ func (r Runner) ScanSBOM(ctx context.Context, sbom []byte) (Scan, error) {
 	if err := os.WriteFile(path, sbom, 0o600); err != nil {
 		return Scan{}, fmt.Errorf("write SBOM: %w", err)
 	}
-	args := append([]string{"sbom", "--quiet", "--format", "json", "--scanners", "vuln"}, r.hardenedFlags()...)
+	args := append([]string{"sbom", "--quiet", "--format", "json", "--scanners", "vuln"}, r.hardenedFlags(dir)...)
 	out, err := r.exec(ctx, r.Bin, append(args, path)...)
 	if err != nil {
 		return Scan{}, fmt.Errorf("trivy SBOM scan failed: %w", err)

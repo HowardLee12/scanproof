@@ -69,3 +69,16 @@ func TestDirectoryLabel(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestDirectoryReferenceEdgeCases(t *testing.T) {
+	for _, ref := range []string{"dir:acme:", "dir:a//b", "dir:a/", "dir:a/../b", "dir:a/./b", "dir:../a", "dir:a/.hidden"} {
+		if _, _, ok := ParseDirectoryReference(ref); ok {
+			t.Errorf("%q must be rejected", ref)
+		}
+	}
+	for _, ref := range []string{"dir:gpu/vllm", "dir:gpu/vllm-2.x:1", "dir:a.b_c-d/e"} {
+		if _, _, ok := ParseDirectoryReference(ref); !ok {
+			t.Errorf("%q must be accepted", ref)
+		}
+	}
+}

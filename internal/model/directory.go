@@ -15,9 +15,14 @@ const ArtifactDirectory = "directory"
 // inventory file: dir:NAME[:VERSION].
 const directoryPrefix = "dir:"
 
+// maxDirectoryLabel bounds a directory's name and its version.
+const maxDirectoryLabel = 128
+
 var (
-	directoryNamePattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$`)
-	directoryVersionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$`)
+	// A name is one or more '/'-separated segments that each start with a
+	// letter or digit, so it has no empty, "." or ".." segments.
+	directoryNamePattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$`)
+	directoryVersionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
 )
 
 // Directory describes a scanned directory tree.
@@ -33,6 +38,8 @@ type Directory struct {
 	Dirs     int    `json:"dirs,omitempty"`
 	Symlinks int    `json:"symlinks,omitempty"`
 	Bytes    int64  `json:"bytes,omitempty"`
+	// Coverage lists files the vulnerability and secret scan did not read.
+	Coverage *Coverage `json:"coverage,omitempty"`
 }
 
 // Label is NAME or NAME:VERSION, for people.
@@ -56,22 +63,23 @@ func ParseDirectoryReference(ref string) (name, version string, ok bool) {
 	if !found {
 		return "", "", false
 	}
-	name, version, _ = strings.Cut(rest, ":")
+	name, version, hasVersion := strings.Cut(rest, ":")
 	if ValidateDirectoryName(name) != nil {
 		return "", "", false
 	}
-	if version != "" && ValidateDirectoryVersion(version) != nil {
+	if hasVersion && ValidateDirectoryVersion(version) != nil {
 		return "", "", false
 	}
 	return name, version, true
 }
 
-// ValidateDirectoryName accepts letters, digits, '.', '_', '-' and '/', up
-// to 128 characters, starting with a letter or digit.
+// ValidateDirectoryName accepts up to 128 characters of '/'-separated
+// segments made of letters, digits, '.', '_' and '-', each starting with a
+// letter or digit.
 func ValidateDirectoryName(name string) error {
-	if !directoryNamePattern.MatchString(name) {
-		return fmt.Errorf("invalid directory name %q: use letters, digits, '.', '_', '-' and '/', "+
-			"start with a letter or digit, at most 128 characters", name)
+	if len(name) > maxDirectoryLabel || !directoryNamePattern.MatchString(name) {
+		return fmt.Errorf("invalid directory name %q: use letters, digits, '.', '_', '-' and '/', start each "+
+			"part between slashes with a letter or digit, at most %d characters", name, maxDirectoryLabel)
 	}
 	return nil
 }
@@ -79,9 +87,9 @@ func ValidateDirectoryName(name string) error {
 // ValidateDirectoryVersion accepts letters, digits, '.', '_', '-' and '+',
 // up to 128 characters, starting with a letter or digit.
 func ValidateDirectoryVersion(version string) error {
-	if !directoryVersionPattern.MatchString(version) {
+	if len(version) > maxDirectoryLabel || !directoryVersionPattern.MatchString(version) {
 		return fmt.Errorf("invalid directory version %q: use letters, digits, '.', '_', '-' and '+', "+
-			"start with a letter or digit, at most 128 characters", version)
+			"start with a letter or digit, at most %d characters", version, maxDirectoryLabel)
 	}
 	return nil
 }

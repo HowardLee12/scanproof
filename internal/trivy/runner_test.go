@@ -308,3 +308,31 @@ func TestScanRootfsReportsFailure(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// scanFuncs runs an image, rootfs and SBOM scan with a fake Trivy that
+// passes the arguments of each scan to check.
+func scanFuncs(t *testing.T, check func(bin string, args []string)) []func() {
+	t.Helper()
+	exec := func(_ context.Context, bin string, args ...string) ([]byte, error) {
+		if args[0] == "version" {
+			return readFixture(t, "trivy-version.json"), nil
+		}
+		check(bin, args)
+		return readFixture(t, "trivy-alpine-3.18.0.json"), nil
+	}
+	r := Runner{Bin: "trivy", exec: exec}
+	return []func(){
+		func() { mustScan(t)(r.Scan(context.Background(), "alpine:3.18.0")) },
+		func() { mustScan(t)(r.ScanRootfs(context.Background(), "/srv/app")) },
+		func() { mustScan(t)(r.ScanSBOM(context.Background(), []byte("{}"))) },
+	}
+}
+
+func mustScan(t *testing.T) func(Scan, error) {
+	return func(_ Scan, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
