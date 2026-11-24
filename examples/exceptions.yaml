@@ -1,0 +1,22 @@
+# Accepted findings. Keep this file in the scanned repository: the pull request
+# that adds an exception, and its review, is the approval record.
+#
+# Every exception needs an id, the finding it covers (a CVE ID or a secret rule
+# ID), a reason and an expiry date. After the expiry date it stops applying and
+# the finding counts again.
+
+exceptions:
+  - id: EX-2026-004
+    finding: CVE-2023-45853
+    package: zlib1g          # optional; without it the exception covers every package
+    reason: The flaw is in MiniZip, which Debian does not build into zlib1g. No fixed version is available.
+    approved_by: security-lead
+    expires: 2027-02-28
+
+  # A secret exception must name the file, so it cannot accept the same kind
+  # of secret anywhere else in the image.
+  - id: EX-2026-005
+    finding: aws-access-key-id
+    path: app/tests/fixtures/fake.ini
+    reason: Documented example key used by tests.
+    expires: 2026-12-31

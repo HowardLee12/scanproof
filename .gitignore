@@ -1,0 +1,5 @@
+/scanproof
+/dist/
+scanproof-out/
+*.test
+coverage.out

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go test -race -coverprofile=coverage.out ./...
+      - name: Coverage
+        run: go tool cover -func=coverage.out | tail -1
+
+  image:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build --build-arg VERSION=ci-${{ github.sha }} -t scanproof:ci .
+      - name: Scan a known-vulnerable image end to end
+        run: |
+          mkdir -p out
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/out:/out" \
+            scanproof:ci scan --out /out alpine:3.18.0
+          test -s out/report.pdf && test -s out/results.json && test -s out/manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sample-evidence
+          path: out/

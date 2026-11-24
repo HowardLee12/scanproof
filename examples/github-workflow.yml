@@ -1,0 +1,36 @@
+# Example: scan the image a job just built, keep the evidence, warn in chat.
+name: Build and scan
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: docker build -t example-api:${{ github.sha }} .
+
+      - name: Scan
+        id: scan
+        uses: HowardLee12/scanproof@v0.1.0
+        with:
+          image: example-api:${{ github.sha }}
+          exceptions: .scanproof/exceptions.yaml
+          mode: warn
+        env:
+          SCANPROOF_DISCORD_WEBHOOK_URL: ${{ secrets.SCANPROOF_DISCORD_WEBHOOK_URL }}
+          SCANPROOF_SLACK_WEBHOOK_URL: ${{ secrets.SCANPROOF_SLACK_WEBHOOK_URL }}
+
+      # Keep the evidence somewhere that outlives GitHub's artifact retention,
+      # for example an S3 bucket with Object Lock.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scanproof-${{ steps.scan.outputs.report-id }}
+          path: ${{ steps.scan.outputs.evidence-dir }}

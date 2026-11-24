@@ -1,0 +1,61 @@
+name: ScanProof
+description: Scan a container image with Trivy and keep the result as audit evidence (JSON, job summary and PDF).
+author: Howard Lee
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  image:
+    description: Image to scan. Prefer a digest, for example registry/app@sha256:...
+    required: true
+  policy:
+    description: Policy file. Empty uses the built-in policy (warn on fixable Critical vulnerabilities and secrets).
+    required: false
+    default: ""
+  exceptions:
+    description: Exceptions file listing accepted findings.
+    required: false
+    default: ""
+  mode:
+    description: warn or enforce. Overrides the policy file; empty keeps it.
+    required: false
+    default: ""
+  out:
+    description: Directory for results.json, summary.md, report.pdf and manifest.json.
+    required: false
+    default: scanproof-out
+  pdf:
+    description: Write report.pdf.
+    required: false
+    default: "true"
+  notify:
+    description: When to post to the webhooks in SCANPROOF_DISCORD_WEBHOOK_URL / SCANPROOF_SLACK_WEBHOOK_URL (violation, always, never).
+    required: false
+    default: violation
+
+outputs:
+  verdict:
+    description: PASS, WARN or FAIL.
+  report-id:
+    description: The report ID printed in every output file.
+  violations:
+    description: Number of policy violations.
+  results:
+    description: Path to results.json.
+  evidence-dir:
+    description: Directory with all evidence files.
+
+runs:
+  using: docker
+  image: Dockerfile
+  args:
+    - scan
+    - --policy=${{ inputs.policy }}
+    - --exceptions=${{ inputs.exceptions }}
+    - --mode=${{ inputs.mode }}
+    - --out=${{ inputs.out }}
+    - --pdf=${{ inputs.pdf }}
+    - --notify=${{ inputs.notify }}
+    - "--"
+    - ${{ inputs.image }}

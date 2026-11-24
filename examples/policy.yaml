@@ -1,0 +1,13 @@
+# ScanProof policy. Every key is optional; missing keys keep the defaults shown.
+
+# warn: report violations but let the pipeline continue.
+# enforce: fail the pipeline (exit code 1) when there are violations.
+mode: warn
+
+fail_on:
+  # Lowest severity that counts as a violation: CRITICAL, HIGH, MEDIUM or LOW.
+  severity: CRITICAL
+  # Only count vulnerabilities that have a fixed package version.
+  fixable_only: true
+  # Count every embedded secret (keys, tokens, passwords) as a violation.
+  secrets: true
