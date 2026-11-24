@@ -70,8 +70,15 @@ type podList struct {
 			Namespace string `json:"namespace"`
 			Name      string `json:"name"`
 		} `json:"metadata"`
+		Spec struct {
+			Containers []struct {
+				Name  string `json:"name"`
+				Image string `json:"image"`
+			} `json:"containers"`
+		} `json:"spec"`
 		Status struct {
 			ContainerStatuses []struct {
+				Name    string `json:"name"`
 				Image   string `json:"image"`
 				ImageID string `json:"imageID"`
 			} `json:"containerStatuses"`
@@ -98,8 +105,13 @@ func (k Kubernetes) List(ctx context.Context) ([]RunningImage, error) {
 		}
 		for _, pod := range page.Items {
 			loc := fmt.Sprintf("k8s %s/%s", pod.Metadata.Namespace, pod.Metadata.Name)
+			specImages := map[string]string{}
+			for _, c := range pod.Spec.Containers {
+				specImages[c.Name] = c.Image
+			}
 			for _, cs := range pod.Status.ContainerStatuses {
-				out = append(out, RunningImage{Reference: cs.Image, Digest: registryDigest(cs.ImageID), Locations: []string{loc}})
+				ref := imageReference(specImages[cs.Name], cs.Image, cs.ImageID)
+				out = append(out, RunningImage{Reference: ref, Digest: registryDigest(cs.ImageID), Locations: []string{loc}})
 			}
 		}
 		if page.Metadata.Continue == "" {
@@ -129,6 +141,21 @@ func (k Kubernetes) get(ctx context.Context, pathAndQuery string, v any) error {
 		return fmt.Errorf("decode pod list: %w", err)
 	}
 	return nil
+}
+
+// imageReference picks the most trustworthy name for a container's image.
+// The pod spec says what was asked for. The status field can hold a bare
+// image ID or another tag of the same image, so it is the last resort after
+// the repository in imageID.
+func imageReference(specImage, statusImage, imageID string) string {
+	if specImage != "" {
+		return specImage
+	}
+	id := strings.TrimPrefix(strings.TrimPrefix(imageID, "docker-pullable://"), "docker://")
+	if repo, _, ok := strings.Cut(id, "@"); ok && repo != "" {
+		return repo
+	}
+	return statusImage
 }
 
 // registryDigest extracts the manifest digest from a container status

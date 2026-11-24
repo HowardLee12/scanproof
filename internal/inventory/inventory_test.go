@@ -62,9 +62,11 @@ func TestKubernetesListsRunningPods(t *testing.T) {
 		`{"metadata":{"continue":"page2"},"items":[{"metadata":{"namespace":"gpu","name":"vllm-0"},"status":{"containerStatuses":[
 		   {"image":"cr.example/vllm:0.9","imageID":"cr.example/vllm@` + digestA + `"},
 		   {"image":"cr.example/sidecar:1","imageID":"docker-pullable://cr.example/sidecar@` + digestB + `"}]}}]}`,
-		`{"metadata":{},"items":[{"metadata":{"namespace":"gpu","name":"vllm-1"},"status":{"containerStatuses":[
-		   {"image":"cr.example/vllm:0.9","imageID":"cr.example/vllm@` + digestA + `"},
-		   {"image":"local/build:dev","imageID":"sha256:cccc"}]}}]}`,
+		`{"metadata":{},"items":[{"metadata":{"namespace":"gpu","name":"vllm-1"},
+		   "spec":{"containers":[{"name":"main","image":"cr.example/vllm:0.9"}]},
+		   "status":{"containerStatuses":[
+		   {"name":"main","image":"sha256:dddd","imageID":"cr.example/vllm@` + digestA + `"},
+		   {"name":"build","image":"local/build:dev","imageID":"sha256:cccc"}]}}]}`,
 	}
 	var auth, path, query []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -170,5 +172,17 @@ func TestDescribeJSONShape(t *testing.T) {
 	data, _ := json.Marshal(RunningImage{Reference: "a", Digest: digestA, Locations: []string{"x"}})
 	if !strings.Contains(string(data), `"locations":["x"]`) {
 		t.Fatalf("got %s", data)
+	}
+}
+
+func TestImageReferencePrefersSpecThenImageID(t *testing.T) {
+	if got := imageReference("cr.example/app:1", "sha256:abc", "cr.example/app@sha256:x"); got != "cr.example/app:1" {
+		t.Errorf("got %q", got)
+	}
+	if got := imageReference("", "sha256:abc", "docker-pullable://cr.example/app@sha256:x"); got != "cr.example/app" {
+		t.Errorf("got %q", got)
+	}
+	if got := imageReference("", "cr.example/app:1", "sha256:abc"); got != "cr.example/app:1" {
+		t.Errorf("got %q", got)
 	}
 }

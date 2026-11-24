@@ -2,6 +2,8 @@ package summary
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 	"time"
@@ -81,10 +83,17 @@ func putDocs(t *testing.T, st store.Store, docs []report.Document) {
 	}
 }
 
+// writeDoc stores results.json and, like a finished upload, its manifest.
 func writeDoc(ctx context.Context, st store.Store, d report.Document) error {
 	data, err := json.Marshal(d)
 	if err != nil {
 		return err
 	}
-	return st.Put(ctx, store.ScanPrefix(d.ReportID, d.GeneratedAt)+"results.json", data, "application/json")
+	prefix := store.ScanPrefix(d.ReportID, d.GeneratedAt)
+	if err := st.Put(ctx, prefix+"results.json", data, "application/json"); err != nil {
+		return err
+	}
+	sum := sha256.Sum256(data)
+	manifest, _ := json.Marshal(report.Manifest{ReportID: d.ReportID, Files: []report.ManifestFile{{Name: "results.json", SHA256: hex.EncodeToString(sum[:])}}})
+	return st.Put(ctx, prefix+"manifest.json", manifest, "application/json")
 }

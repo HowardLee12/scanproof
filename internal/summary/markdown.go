@@ -19,11 +19,11 @@ func Markdown(s Summary) string {
 		c.Scans, c.CIScans, c.RescanScans, c.ManualScans, c.Images, c.Repositories,
 		c.DaysWithRescans, c.DaysInPeriod, c.Pass, c.Warn, c.Fail)
 
-	b.WriteString("| Severity | SLA days | Opened | Fixed | Fixed in SLA | Median days to fix | Open in SLA | Open overdue |\n")
-	b.WriteString("|---|---:|---:|---:|---:|---:|---:|---:|\n")
+	b.WriteString("| Severity | SLA days | Opened | Fixed | Fixed in SLA | Median days to fix | Accepted or no fix | Open in SLA | Open overdue |\n")
+	b.WriteString("|---|---:|---:|---:|---:|---:|---:|---:|---:|\n")
 	for _, r := range s.Remediation {
-		fmt.Fprintf(&b, "| %s | %d | %d | %d | %d | %s | %d | %d |\n", r.Severity, r.SLADays, r.Opened, r.Fixed,
-			r.FixedInSLA, formatDays(r.MedianDaysToFix), r.OpenInSLA, r.OpenOverdue)
+		fmt.Fprintf(&b, "| %s | %d | %d | %d | %d | %s | %d | %d | %d |\n", r.Severity, r.SLADays, r.Opened, r.Fixed,
+			r.FixedInSLA, formatDays(r.MedianDaysToFix), r.ClosedOther, r.OpenInSLA, r.OpenOverdue)
 	}
 	b.WriteString("\n")
 

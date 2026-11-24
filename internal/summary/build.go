@@ -25,14 +25,18 @@ type Input struct {
 	Policy        policy.Policy
 	StoreLocation string
 	Scans         []Loaded
+	// Incomplete lists scan folders skipped because their upload never
+	// finished.
+	Incomplete []string
 }
 
 // PeriodInfo describes the reporting window.
 type PeriodInfo struct {
-	From         string `json:"from"`
-	To           string `json:"to"`
-	Days         int    `json:"days"`
-	LookbackDays int    `json:"lookback_days"`
+	From         string    `json:"from"`
+	To           string    `json:"to"`
+	Days         int       `json:"days"`
+	LookbackDays int       `json:"lookback_days"`
+	AsOf         time.Time `json:"as_of"`
 }
 
 // Coverage shows whether scanning ran throughout the period.
@@ -59,6 +63,7 @@ type SeverityRemediation struct {
 	Fixed           int            `json:"fixed"`
 	FixedInSLA      int            `json:"fixed_in_sla"`
 	MedianDaysToFix float64        `json:"median_days_to_fix"`
+	ClosedOther     int            `json:"closed_other"`
 	OpenInSLA       int            `json:"open_in_sla"`
 	OpenOverdue     int            `json:"open_overdue"`
 }
@@ -96,9 +101,10 @@ type Summary struct {
 	FixedLate       []TrackedFinding      `json:"fixed_late"`
 	Overdue         []TrackedFinding      `json:"overdue"`
 	Exceptions      ExceptionActivity     `json:"exceptions"`
+	Incomplete      []string              `json:"incomplete_uploads"`
 	PopulationCount int                   `json:"population_count"`
 	Population      []PopulationRow       `json:"-"`
-	periodEnd       time.Time
+	asOf            time.Time
 }
 
 // Build aggregates the loaded scans into a period summary.
@@ -109,8 +115,9 @@ func Build(in Input) Summary {
 			inPeriod = append(inPeriod, s)
 		}
 	}
+	asOf := in.Period.AsOf(in.GeneratedAt)
 	tracked := track(in.Scans, in.Policy)
-	remediation, late, overdue := remediate(tracked, in.Policy, in.Period)
+	remediation, late, overdue := remediate(tracked, in.Policy, in.Period, asOf)
 	population := populationRows(inPeriod)
 
 	return Summary{
@@ -120,22 +127,23 @@ func Build(in Input) Summary {
 		Tool:        in.Tool,
 		Period: PeriodInfo{
 			From: in.Period.From.Format("2006-01-02"), To: in.Period.To.Format("2006-01-02"),
-			Days: in.Period.Days(), LookbackDays: in.Period.LookbackDays,
+			Days: in.Period.Days(), LookbackDays: in.Period.LookbackDays, AsOf: asOf,
 		},
 		Store:           in.StoreLocation,
-		Coverage:        coverage(inPeriod, in.Period),
+		Coverage:        coverage(inPeriod, in.Period.DaysUntil(asOf)),
 		Remediation:     remediation,
 		FixedLate:       late,
 		Overdue:         overdue,
 		Exceptions:      exceptionActivity(inPeriod),
+		Incomplete:      orEmpty(in.Incomplete),
 		PopulationCount: len(population),
 		Population:      population,
-		periodEnd:       in.Period.End(),
+		asOf:            asOf,
 	}
 }
 
-func coverage(scans []Loaded, p Period) Coverage {
-	c := Coverage{Scans: len(scans), DaysInPeriod: p.Days()}
+func coverage(scans []Loaded, daysSoFar int) Coverage {
+	c := Coverage{Scans: len(scans), DaysInPeriod: daysSoFar}
 	digests, repos, rescanDays := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, s := range scans {
 		switch s.Trigger {
@@ -169,7 +177,7 @@ func coverage(scans []Loaded, p Period) Coverage {
 	return c
 }
 
-func remediate(tracked []TrackedFinding, pol policy.Policy, p Period) ([]SeverityRemediation, []TrackedFinding, []TrackedFinding) {
+func remediate(tracked []TrackedFinding, pol policy.Policy, p Period, asOf time.Time) ([]SeverityRemediation, []TrackedFinding, []TrackedFinding) {
 	rows := []SeverityRemediation{}
 	late, overdue := []TrackedFinding{}, []TrackedFinding{}
 	for _, sev := range model.AllSeverities() {
@@ -187,18 +195,20 @@ func remediate(tracked []TrackedFinding, pol policy.Policy, p Period) ([]Severit
 				row.Opened++
 			}
 			switch {
-			case f.FixedAt != nil && p.Contains(*f.FixedAt):
+			case f.ClosedAt != nil && p.Contains(*f.ClosedAt) && f.Fixed():
 				row.Fixed++
-				fixDays = append(fixDays, f.DaysOpen(p.End()))
-				if !f.FixedAt.After(f.Due) {
+				fixDays = append(fixDays, f.DaysOpen(asOf))
+				if !f.ClosedAt.After(f.Due) {
 					row.FixedInSLA++
 				} else {
 					late = append(late, f)
 				}
-			case f.FixedAt == nil && p.End().After(f.Due):
+			case f.ClosedAt != nil && p.Contains(*f.ClosedAt):
+				row.ClosedOther++
+			case f.ClosedAt == nil && asOf.After(f.Due):
 				row.OpenOverdue++
 				overdue = append(overdue, f)
-			case f.FixedAt == nil:
+			case f.ClosedAt == nil:
 				row.OpenInSLA++
 			}
 		}
@@ -283,4 +293,11 @@ func NewSummaryID(now time.Time) (string, error) {
 		return "", fmt.Errorf("generate summary ID: %w", err)
 	}
 	return fmt.Sprintf("PS-%s-%s", now.UTC().Format("20060102"), strings.ToUpper(hex.EncodeToString(buf))), nil
+}
+
+func orEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }

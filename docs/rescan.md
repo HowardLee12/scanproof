@@ -106,4 +106,4 @@ Pin each line to a digest. Then the rescan can use the stored SBOM and checks ex
 
 ## In the period summary
 
-Rescans appear in `population.csv` with trigger `rescan`. The summary counts the days on which rescans ran, and it closes a finding at the first later scan of the same image that no longer reports it. A rescan of a newer image version therefore records the fix.
+Rescans appear in `population.csv` with trigger `rescan`, and the summary counts the days on which rescans ran. All scans of the same image name on the same day are combined. A finding therefore stays open while any running copy still has it, and counts as fixed on the first day no scan of that image reports it, for example after a newer version replaces the old one everywhere.

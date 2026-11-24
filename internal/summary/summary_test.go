@@ -3,6 +3,7 @@ package summary
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -56,18 +57,87 @@ func TestTrackRemediation(t *testing.T) {
 		t.Fatalf("got %d tracked findings, want CVE-A, B, C and D only: %+v", len(tracked), tracked)
 	}
 	a := byID["CVE-A"]
-	if a.FixedAt == nil || !a.FixedAt.Equal(day(5)) || !a.FirstSeen.Equal(day(1)) || !a.Due.Equal(day(1).AddDate(0, 0, 15)) {
+	if !a.Fixed() || !a.ClosedAt.Equal(day(5)) || !a.FirstSeen.Equal(day(1)) || !a.Due.Equal(day(1).AddDate(0, 0, 15)) {
 		t.Errorf("CVE-A = %+v", a)
 	}
-	b := byID["CVE-B"]
-	if b.FixedAt == nil || !b.FixedAt.Equal(day(40)) {
+	if b := byID["CVE-B"]; !b.Fixed() || !b.ClosedAt.Equal(day(40)) {
 		t.Errorf("CVE-B should be fixed by the day 40 scan: %+v", b)
 	}
-	if c := byID["CVE-C"]; c.FixedAt != nil || c.Image != "repo/web" {
+	if c := byID["CVE-C"]; c.ClosedAt != nil || c.Image != "repo/web" || !c.LastSeen.Equal(day(88)) {
 		t.Errorf("CVE-C should still be open: %+v", c)
 	}
-	if d := byID["CVE-D"]; d.FixedAt == nil || !d.FixedAt.Equal(day(3)) || !d.FirstSeen.Before(periodFrom) {
+	if d := byID["CVE-D"]; !d.Fixed() || !d.ClosedAt.Equal(day(3)) || !d.FirstSeen.Before(periodFrom) {
 		t.Errorf("CVE-D = %+v", d)
+	}
+}
+
+func loaded(docs ...report.Document) []Loaded {
+	out := make([]Loaded, 0, len(docs))
+	for _, d := range docs {
+		out = append(out, Loaded{Document: d})
+	}
+	return out
+}
+
+func TestSameDayScansOfOneImageAreCombined(t *testing.T) {
+	crit := finding("CVE-P", "openssl", model.SeverityCritical, "3.0.15")
+	scans := []Loaded{}
+	// prod still runs the vulnerable build; staging runs a fixed one. Both
+	// are rescanned every day for 30 days.
+	for n := 1; n <= 30; n++ {
+		at := day(n)
+		scans = append(scans, loaded(
+			scanDoc(fmt.Sprintf("SR-P%d", n), "repo/app:1", "sha256:p", at, report.TriggerRescan, policy.VerdictWarn, crit),
+			scanDoc(fmt.Sprintf("SR-S%d", n), "repo/app:2", "sha256:s", at.Add(time.Minute), report.TriggerRescan, policy.VerdictPass),
+		)...)
+	}
+	tracked := track(scans, policy.Default())
+	if len(tracked) != 1 || tracked[0].ClosedAt != nil || !tracked[0].FirstSeen.Equal(day(1)) {
+		t.Fatalf("the finding must stay open while prod still has it: %+v", tracked)
+	}
+}
+
+func TestReappearingFindingKeepsItsDeadline(t *testing.T) {
+	crit := finding("CVE-R", "openssl", model.SeverityCritical, "3.0.15")
+	scans := loaded(
+		scanDoc("SR-1", "repo/app:1", "sha256:1", day(1), report.TriggerCI, policy.VerdictWarn, crit),
+		scanDoc("SR-2", "repo/app:2", "sha256:2", day(2), report.TriggerCI, policy.VerdictPass),
+		scanDoc("SR-3", "repo/app:1", "sha256:1", day(20), report.TriggerRescan, policy.VerdictWarn, crit),
+	)
+	tracked := track(scans, policy.Default())
+	if len(tracked) != 1 || tracked[0].ClosedAt != nil || !tracked[0].FirstSeen.Equal(day(1)) || !tracked[0].Due.Equal(day(16)) {
+		t.Fatalf("a finding that comes back reopens with its original dates: %+v", tracked)
+	}
+}
+
+func TestAcceptedAndUnfixableClosuresAreNotFixes(t *testing.T) {
+	crit := finding("CVE-E", "openssl", model.SeverityCritical, "3.0.15")
+	accepted := crit
+	accepted.ExceptionID = "EX-9"
+	high := finding("CVE-N", "curl", model.SeverityHigh, "8.9.1")
+	noFix := finding("CVE-N", "curl", model.SeverityHigh, "")
+	scans := loaded(
+		scanDoc("SR-1", "repo/app:1", "sha256:1", day(1), report.TriggerCI, policy.VerdictWarn, crit, high),
+		scanDoc("SR-2", "repo/app:1", "sha256:1", day(30), report.TriggerRescan, policy.VerdictPass, accepted, noFix),
+	)
+	s := Build(Input{GeneratedAt: periodTo.AddDate(0, 0, 2), Period: testPeriod(), Policy: policy.Default(), Scans: scans})
+	crit2, high2 := s.remediation(model.SeverityCritical), s.remediation(model.SeverityHigh)
+	if crit2.Fixed != 0 || crit2.ClosedOther != 1 || high2.Fixed != 0 || high2.ClosedOther != 1 || len(s.FixedLate) != 0 {
+		t.Fatalf("accepting a finding or losing its fix is not a remediation: crit %+v high %+v", crit2, high2)
+	}
+}
+
+func TestOpenFindingsAreJudgedAtReportTime(t *testing.T) {
+	high := finding("CVE-H", "curl", model.SeverityHigh, "8.9.1")
+	scans := loaded(scanDoc("SR-1", "repo/app:1", "sha256:1", day(80), report.TriggerCI, policy.VerdictPass, high))
+	// The report runs on day 85, before the period ends and before the
+	// finding's 30-day deadline.
+	s := Build(Input{GeneratedAt: day(85), Period: testPeriod(), Policy: policy.Default(), Scans: scans})
+	if r := s.remediation(model.SeverityHigh); r.OpenOverdue != 0 || r.OpenInSLA != 1 {
+		t.Fatalf("a finding is only overdue once its deadline has passed: %+v", r)
+	}
+	if s.Coverage.DaysInPeriod != 85 {
+		t.Errorf("days so far = %d, want 85", s.Coverage.DaysInPeriod)
 	}
 }
 
@@ -128,10 +198,11 @@ func TestLoadReadsOnlyResultsInRange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	loaded, err := Load(context.Background(), st, testPeriod())
+	result, err := Load(context.Background(), st, testPeriod())
 	if err != nil {
 		t.Fatal(err)
 	}
+	loaded := result.Scans
 	ids := []string{}
 	for _, l := range loaded {
 		ids = append(ids, l.ReportID)
@@ -144,13 +215,29 @@ func TestLoadReadsOnlyResultsInRange(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsCorruptResults(t *testing.T) {
-	st, _ := store.Open(context.Background(), "file://"+t.TempDir())
-	if err := st.Put(context.Background(), store.ScanPrefix("SR-BAD", day(1))+"results.json", []byte("{not json"), "application/json"); err != nil {
+func TestLoadSkipsUnfinishedUploadsAndRejectsTampering(t *testing.T) {
+	ctx := context.Background()
+	st, _ := store.Open(ctx, "file://"+t.TempDir())
+	good := scanDoc("SR-GOOD", "a:1", "sha256:1", day(1), report.TriggerCI, policy.VerdictPass)
+	putDocs(t, st, []report.Document{good})
+	// An upload that stopped before the manifest was written.
+	if err := st.Put(ctx, store.ScanPrefix("SR-HALF", day(1))+"results.json", []byte("{}"), "application/json"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(context.Background(), st, testPeriod()); err == nil {
-		t.Fatal("a corrupt results.json must not be skipped silently")
+	result, err := Load(ctx, st, testPeriod())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Scans) != 1 || len(result.Incomplete) != 1 || !strings.Contains(result.Incomplete[0], "SR-HALF") {
+		t.Fatalf("scans %d, incomplete %v", len(result.Scans), result.Incomplete)
+	}
+
+	// A results.json whose hash does not match its manifest.
+	prefix := store.ScanPrefix("SR-EDIT", day(2))
+	_ = st.Put(ctx, prefix+"results.json", []byte(`{"schema":"scanproof/v1"}`), "application/json")
+	_ = st.Put(ctx, prefix+"manifest.json", []byte(`{"files":[{"name":"results.json","sha256":"00"}]}`), "application/json")
+	if _, err := Load(ctx, st, testPeriod()); err == nil || !strings.Contains(err.Error(), "SHA-256") {
+		t.Fatalf("a changed results.json must be reported, got %v", err)
 	}
 }
 

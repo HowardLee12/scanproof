@@ -256,5 +256,7 @@ scanproof report \
 - `--lookback-days` (default 90) also reads scans from before the period. A finding that was already open on day one then gets its real first-seen date, so its SLA deadline is right.
 - `--policy` supplies `sla_days`. Without it, Critical, High and Medium findings get 15, 30 and 90 days.
 - `--save` stores the summary in the bucket as well, under `summaries/`.
+- A scan counts only once its `manifest.json` exists, because the manifest is uploaded last. Folders without one, left by an interrupted upload, are listed in the summary as incomplete. A `results.json` that doesn't match the SHA-256 in its manifest stops the summary with an error.
+- Open findings are judged when the summary runs. If you make a summary before the period ends, a finding counts as overdue only if its deadline has already passed.
 
 The summary needs one `List` request per day of the period plus the look-back window. It then needs one `Get` request per scan.

@@ -137,7 +137,7 @@ func (s *S3Store) List(ctx context.Context, prefix string) ([]string, error) {
 		for _, obj := range out.Contents {
 			keys = append(keys, strings.TrimPrefix(aws.ToString(obj.Key), s.prefix))
 		}
-		if !aws.ToBool(out.IsTruncated) {
+		if !aws.ToBool(out.IsTruncated) || aws.ToString(out.NextContinuationToken) == "" {
 			break
 		}
 		in.ContinuationToken = out.NextContinuationToken

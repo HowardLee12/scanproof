@@ -8,23 +8,34 @@ import (
 	"github.com/HowardLee12/scanproof/internal/policy"
 )
 
-// TrackedFinding follows one vulnerability in one image from the first scan
-// that reported it to the first later scan of that image without it.
+// How a tracked finding stopped being open.
+const (
+	ResolutionFixed    = "fixed"
+	ResolutionAccepted = "accepted"
+	ResolutionNoFix    = "no_longer_fixable"
+)
+
+// TrackedFinding follows one vulnerability in one image name over time.
 type TrackedFinding struct {
-	Image     string         `json:"image"`
-	ID        string         `json:"id"`
-	Package   string         `json:"package"`
-	Severity  model.Severity `json:"severity"`
-	FirstSeen time.Time      `json:"first_seen"`
-	FixedAt   *time.Time     `json:"fixed_at,omitempty"`
-	Due       time.Time      `json:"due"`
+	Image      string         `json:"image"`
+	ID         string         `json:"id"`
+	Package    string         `json:"package"`
+	Severity   model.Severity `json:"severity"`
+	FirstSeen  time.Time      `json:"first_seen"`
+	LastSeen   time.Time      `json:"last_seen"`
+	Due        time.Time      `json:"due"`
+	ClosedAt   *time.Time     `json:"closed_at,omitempty"`
+	Resolution string         `json:"resolution,omitempty"`
 }
 
-// DaysOpen is the time from first seen to the fix, or to end if not fixed.
-func (f TrackedFinding) DaysOpen(end time.Time) float64 {
-	stop := end
-	if f.FixedAt != nil {
-		stop = *f.FixedAt
+// Fixed reports whether the finding was closed because it went away.
+func (f TrackedFinding) Fixed() bool { return f.Resolution == ResolutionFixed }
+
+// DaysOpen is the time from first seen to closing, or to asOf if still open.
+func (f TrackedFinding) DaysOpen(asOf time.Time) float64 {
+	stop := asOf
+	if f.ClosedAt != nil {
+		stop = *f.ClosedAt
 	}
 	return stop.Sub(f.FirstSeen).Hours() / 24
 }
@@ -35,11 +46,26 @@ func imageName(ref string) string {
 	return model.ImageName(ref)
 }
 
-// track follows every finding that has a deadline: it has a fix available,
-// no exception accepts it, and its severity has an SLA. Scans must be sorted
-// oldest first. Scans of the same image name are compared in time order, so
-// if two versions of one image run at the same time a finding can appear to
-// close and reopen.
+// status of one finding in one day's scans of an image name.
+type status int
+
+const (
+	statusAbsent status = iota
+	statusNoFix
+	statusAccepted
+	statusOpen
+)
+
+// track follows every finding that has a deadline (a fix exists, no
+// exception accepts it, and its severity has an SLA).
+//
+// Scans of one image name are combined per UTC day: a finding stays open
+// while any scan that day still reports it, so an image that runs in two
+// places (say prod with the finding and staging without it) does not look
+// fixed. A finding that comes back after being closed is reopened with its
+// original first-seen date and deadline, so it cannot reset its SLA clock.
+// Findings later accepted by an exception, or whose fix disappears from the
+// vulnerability data, are closed with that reason and never count as fixed.
 func track(scans []Loaded, pol policy.Policy) []TrackedFinding {
 	byImage := map[string][]Loaded{}
 	names := []string{}
@@ -59,43 +85,102 @@ func track(scans []Loaded, pol policy.Policy) []TrackedFinding {
 	return out
 }
 
-func trackImage(name string, scans []Loaded, pol policy.Policy) []TrackedFinding {
-	done := make([]TrackedFinding, 0)
-	open := map[string]TrackedFinding{}
+type dayScan struct {
+	at       time.Time // first scan of the day
+	statuses map[string]status
+	seen     map[string]trackedInfo
+}
+
+type trackedInfo struct {
+	id, pkg  string
+	severity model.Severity
+	at       time.Time
+}
+
+// groupByDay merges one image name's scans (oldest first) into days.
+func groupByDay(scans []Loaded, pol policy.Policy) []dayScan {
+	days := []dayScan{}
 	for _, s := range scans {
-		at := s.GeneratedAt
-		present := map[string]bool{}
+		day := s.GeneratedAt.UTC().Format("2006-01-02")
+		if len(days) == 0 || days[len(days)-1].at.UTC().Format("2006-01-02") != day {
+			days = append(days, dayScan{at: s.GeneratedAt, statuses: map[string]status{}, seen: map[string]trackedInfo{}})
+		}
+		d := &days[len(days)-1]
 		for _, f := range s.Vulnerabilities {
-			sla := pol.SLA(f.Severity)
-			if !f.Fixable() || f.Accepted() || sla == 0 {
+			if pol.SLA(f.Severity) == 0 {
 				continue
 			}
 			key := f.ID + "|" + f.Package
-			present[key] = true
-			if _, ok := open[key]; !ok {
-				open[key] = TrackedFinding{
-					Image: name, ID: f.ID, Package: f.Package, Severity: f.Severity,
-					FirstSeen: at, Due: at.AddDate(0, 0, sla),
+			st := statusNoFix
+			switch {
+			case f.Accepted():
+				st = statusAccepted
+			case f.Fixable():
+				st = statusOpen
+			}
+			if st > d.statuses[key] {
+				d.statuses[key] = st
+			}
+			if _, ok := d.seen[key]; !ok && st == statusOpen {
+				d.seen[key] = trackedInfo{id: f.ID, pkg: f.Package, severity: f.Severity, at: s.GeneratedAt}
+			}
+		}
+	}
+	return days
+}
+
+func trackImage(name string, scans []Loaded, pol policy.Policy) []TrackedFinding {
+	all := []*TrackedFinding{}
+	open := map[string]*TrackedFinding{}
+	lastClosed := map[string]*TrackedFinding{}
+
+	for _, d := range groupByDay(scans, pol) {
+		for key, st := range d.statuses {
+			if st != statusOpen {
+				continue
+			}
+			info := d.seen[key]
+			switch {
+			case open[key] != nil:
+				open[key].LastSeen = info.at
+			case lastClosed[key] != nil:
+				f := lastClosed[key]
+				f.ClosedAt, f.Resolution, f.LastSeen = nil, "", info.at
+				open[key] = f
+				delete(lastClosed, key)
+			default:
+				f := &TrackedFinding{
+					Image: name, ID: info.id, Package: info.pkg, Severity: info.severity,
+					FirstSeen: info.at, LastSeen: info.at, Due: info.at.AddDate(0, 0, pol.SLA(info.severity)),
 				}
+				open[key] = f
+				all = append(all, f)
 			}
 		}
 		for key, f := range open {
-			if !present[key] {
-				fixed := at
-				f.FixedAt = &fixed
-				done = append(done, f)
-				delete(open, key)
+			st := d.statuses[key]
+			if st == statusOpen {
+				continue
 			}
+			closed := d.at
+			f.ClosedAt = &closed
+			f.Resolution = map[status]string{
+				statusAbsent: ResolutionFixed, statusAccepted: ResolutionAccepted, statusNoFix: ResolutionNoFix,
+			}[st]
+			lastClosed[key] = f
+			delete(open, key)
 		}
 	}
-	for _, f := range open {
-		done = append(done, f)
+
+	out := make([]TrackedFinding, 0, len(all))
+	for _, f := range all {
+		out = append(out, *f)
 	}
-	sort.Slice(done, func(i, j int) bool {
-		if !done[i].FirstSeen.Equal(done[j].FirstSeen) {
-			return done[i].FirstSeen.Before(done[j].FirstSeen)
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].FirstSeen.Equal(out[j].FirstSeen) {
+			return out[i].FirstSeen.Before(out[j].FirstSeen)
 		}
-		return done[i].ID+done[i].Package < done[j].ID+done[j].Package
+		return out[i].ID+out[i].Package < out[j].ID+out[j].Package
 	})
-	return done
+	return out
 }

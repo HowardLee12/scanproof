@@ -143,3 +143,52 @@ func TestRescanUsageErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestRescanFallsBackWhenTheStoredSBOMWasChanged(t *testing.T) {
+	storeDir := t.TempDir()
+	trivyBin := fakeTrivy(t)
+	seed := newHarness()
+	seed.now = time.Date(2026, 11, 1, 6, 0, 0, 0, time.UTC)
+	if code := seed.run("scan", "--trivy", trivyBin, "--out", t.TempDir(), "--pdf=false",
+		"--store", "file://"+storeDir, "--", "alpine:3.18.0"); code != 0 {
+		t.Fatalf("seed scan: %d %s", code, seed.stderr.String())
+	}
+	sboms, _ := filepath.Glob(filepath.Join(storeDir, "scans", "*", "*", "*", "*", "sbom.cdx.json"))
+	if len(sboms) != 1 {
+		t.Fatalf("expected one stored SBOM, got %v", sboms)
+	}
+	if err := os.WriteFile(sboms[0], []byte(`{"bomFormat":"CycloneDX","components":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	images := filepath.Join(t.TempDir(), "images.txt")
+	writeFile(t, images, "alpine:3.18.0@"+fixtureDigest+"\n")
+	h := newHarness()
+	h.now = time.Date(2026, 11, 24, 6, 0, 0, 0, time.UTC)
+	if code := h.run("rescan", "--store", "file://"+storeDir, "--inventory", "file", "--images-file", images,
+		"--trivy", trivyBin, "--out", t.TempDir()); code != 0 {
+		t.Fatalf("code %d: %s", code, h.stderr.String())
+	}
+	if !strings.Contains(h.stderr.String(), "does not match the SHA-256") {
+		t.Errorf("expected a warning about the changed SBOM, got %q", h.stderr.String())
+	}
+	rescans := storedResults(t, storeDir)["rescan"]
+	if len(rescans) != 1 || rescans[0]["runtime"].(map[string]any)["method"] != "image" {
+		t.Fatalf("the image should have been pulled instead: %+v", rescans)
+	}
+}
+
+func TestImportedResultsDoNotCreateAnSBOM(t *testing.T) {
+	storeDir := t.TempDir()
+	h := newHarness()
+	if code := h.run("scan", "--trivy-results", fixture, "--trivy", fakeTrivy(t), "--out", t.TempDir(),
+		"--pdf=false", "--store", "file://"+storeDir); code != 0 {
+		t.Fatalf("code %d: %s", code, h.stderr.String())
+	}
+	if sboms, _ := filepath.Glob(filepath.Join(storeDir, "scans", "*", "*", "*", "*", "sbom.cdx.json")); len(sboms) != 0 {
+		t.Fatalf("an imported report must not produce an SBOM: %v", sboms)
+	}
+	if _, err := os.Stat(filepath.Join(storeDir, "index")); err == nil {
+		t.Fatal("scans without an SBOM must not be indexed")
+	}
+}

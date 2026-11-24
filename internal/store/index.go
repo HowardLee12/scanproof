@@ -40,29 +40,44 @@ func PutIndexEntry(ctx context.Context, st Store, digest string, e IndexEntry) e
 	return st.Put(ctx, prefix+e.ReportID+".json", data, "application/json")
 }
 
-// LatestSBOM returns the newest indexed scan of digest that saved an SBOM.
-// Report IDs start with the date, so key order is time order.
-func LatestSBOM(ctx context.Context, st Store, digest string) (IndexEntry, bool, error) {
+var reportIDPattern = regexp.MustCompile(`^SR-(\d{8})-[0-9A-F]{6}$`)
+
+// SBOMEntries returns the indexed scans of digest that saved an SBOM, newest
+// first. Entries whose report ID or folder does not have the expected form
+// are skipped, so a stray object in the index cannot redirect a rescan.
+// Callers must still check the SBOM against the scan's manifest.
+func SBOMEntries(ctx context.Context, st Store, digest string) ([]IndexEntry, error) {
 	prefix, err := DigestIndexPrefix(digest)
 	if err != nil {
-		return IndexEntry{}, false, err
+		return nil, err
 	}
 	keys, err := st.List(ctx, prefix)
 	if err != nil {
-		return IndexEntry{}, false, err
+		return nil, err
 	}
+	out := make([]IndexEntry, 0, len(keys))
 	for i := len(keys) - 1; i >= 0; i-- {
 		data, err := st.Get(ctx, keys[i])
 		if err != nil {
-			return IndexEntry{}, false, err
+			return nil, err
 		}
 		var e IndexEntry
 		if err := json.Unmarshal(data, &e); err != nil {
-			return IndexEntry{}, false, fmt.Errorf("decode %s: %w", st.Location(keys[i]), err)
+			continue
 		}
-		if e.HasSBOM {
-			return e, true, nil
+		if e.HasSBOM && validEntry(e) && keys[i] == prefix+e.ReportID+".json" {
+			out = append(out, e)
 		}
 	}
-	return IndexEntry{}, false, nil
+	return out, nil
+}
+
+func validEntry(e IndexEntry) bool {
+	m := reportIDPattern.FindStringSubmatch(e.ReportID)
+	if m == nil {
+		return false
+	}
+	day := m[1]
+	want := "scans/" + day[0:4] + "/" + day[4:6] + "/" + day[6:8] + "/" + e.ReportID + "/"
+	return e.ScanPrefix == want
 }

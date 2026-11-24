@@ -40,3 +40,24 @@ func (p Period) Days() int {
 func (p Period) LoadFrom() time.Time {
 	return p.From.AddDate(0, 0, -p.LookbackDays)
 }
+
+// AsOf is when open findings are judged: the end of the period, or now if
+// the summary is made before the period is over.
+func (p Period) AsOf(now time.Time) time.Time {
+	if now.Before(p.End()) {
+		return now
+	}
+	return p.End()
+}
+
+// DaysUntil counts the period's days that have started by t.
+func (p Period) DaysUntil(t time.Time) int {
+	if !t.After(p.From) {
+		return 0
+	}
+	days := int(t.Sub(p.From).Hours() / 24)
+	if p.From.AddDate(0, 0, days).Before(t) {
+		days++
+	}
+	return min(days, p.Days())
+}

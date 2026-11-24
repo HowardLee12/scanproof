@@ -89,3 +89,20 @@ func TestBuildManifestHashesEveryFile(t *testing.T) {
 		t.Error("expected an error for a missing file")
 	}
 }
+
+func TestVerifyAgainstManifest(t *testing.T) {
+	sum := sha256.Sum256([]byte("data"))
+	manifest, _ := json.Marshal(Manifest{ImageDigest: "sha256:x", Files: []ManifestFile{{Name: "a.json", SHA256: hex.EncodeToString(sum[:])}}})
+	if m, err := VerifyAgainstManifest(manifest, "a.json", []byte("data")); err != nil || m.ImageDigest != "sha256:x" {
+		t.Fatalf("got %+v, %v", m, err)
+	}
+	if _, err := VerifyAgainstManifest(manifest, "a.json", []byte("changed")); err == nil {
+		t.Error("a changed file must fail")
+	}
+	if _, err := VerifyAgainstManifest(manifest, "b.json", []byte("data")); err == nil {
+		t.Error("a file the manifest does not list must fail")
+	}
+	if _, err := VerifyAgainstManifest([]byte("{"), "a.json", nil); err == nil {
+		t.Error("a broken manifest must fail")
+	}
+}

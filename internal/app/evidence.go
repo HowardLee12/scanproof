@@ -111,9 +111,10 @@ func uploadEvidence(ctx context.Context, st store.Store, outDir string, doc repo
 	if err := uploadFiles(ctx, st, outDir, prefix, names); err != nil {
 		return "", err
 	}
-	// The digest index lets rescans find this scan's SBOM later.
-	if _, err := store.DigestIndexPrefix(doc.Image.Digest); err == nil {
-		entry := store.IndexEntry{ReportID: doc.ReportID, ScanPrefix: prefix, HasSBOM: contains(names, sbomFile)}
+	// The digest index lets rescans find this scan's SBOM later. Only scans
+	// that saved an SBOM are indexed, so the index stays small.
+	if _, err := store.DigestIndexPrefix(doc.Image.Digest); err == nil && contains(names, sbomFile) {
+		entry := store.IndexEntry{ReportID: doc.ReportID, ScanPrefix: prefix, HasSBOM: true}
 		if err := store.PutIndexEntry(ctx, st, doc.Image.Digest, entry); err != nil {
 			return "", err
 		}

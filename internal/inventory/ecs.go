@@ -95,6 +95,12 @@ func (e ECS) clusterImages(ctx context.Context, cluster string) ([]RunningImage,
 		if err != nil {
 			return nil, fmt.Errorf("describe tasks in %s: %w", cluster, err)
 		}
+		for _, f := range desc.Failures {
+			// MISSING means the task stopped after it was listed.
+			if aws.ToString(f.Reason) != "MISSING" {
+				return nil, fmt.Errorf("describe task %s in %s: %s", aws.ToString(f.Arn), cluster, aws.ToString(f.Reason))
+			}
+		}
 		for _, task := range desc.Tasks {
 			loc := fmt.Sprintf("ecs %s/%s", name, aws.ToString(task.Group))
 			for _, c := range task.Containers {

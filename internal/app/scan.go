@@ -29,6 +29,11 @@ func runScan(ctx context.Context, args []string, env Env) int {
 	if err != nil {
 		return fail(env, err)
 	}
+	// An imported report may list only vulnerable packages, so an SBOM built
+	// from it would make later rescans miss new vulnerabilities.
+	if opts.TrivyResults != "" {
+		opts.SBOM = false
+	}
 
 	// Open the store first, so a bad URL fails before a long scan.
 	var st store.Store

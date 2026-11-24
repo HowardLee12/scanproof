@@ -167,20 +167,12 @@ func rescanOne(ctx context.Context, opts rescanOptions, env Env, st store.Store,
 	defer cancel()
 
 	rt := &report.Runtime{Locations: img.Locations}
-	var scan trivy.Scan
-	entry, haveSBOM, err := latestSBOM(ctx, st, img.Digest)
+	scan, from, err := rescanFromSBOM(ctx, env, st, runner, img)
 	switch {
 	case err != nil:
 		return report.Document{}, false, err
-	case haveSBOM:
-		sbom, err := st.Get(ctx, entry.ScanPrefix+sbomFile)
-		if err != nil {
-			return report.Document{}, false, err
-		}
-		if scan, err = runner.ScanSBOM(ctx, sbom); err != nil {
-			return report.Document{}, false, err
-		}
-		rt.Method, rt.SBOMFrom = report.MethodSBOM, entry.ReportID
+	case from != "":
+		rt.Method, rt.SBOMFrom = report.MethodSBOM, from
 		scan.Raw = nil // nothing new to convert into an SBOM
 	case opts.PullMissing:
 		if scan, err = runner.Scan(ctx, img.ScanReference()); err != nil {
@@ -215,14 +207,51 @@ func rescanOne(ctx context.Context, opts rescanOptions, env Env, st store.Store,
 	return doc, false, nil
 }
 
-func latestSBOM(ctx context.Context, st store.Store, digest string) (store.IndexEntry, bool, error) {
-	if digest == "" {
-		return store.IndexEntry{}, false, nil
+// rescanFromSBOM checks the newest stored SBOM of the image's digest that
+// matches its scan's manifest. It returns the report ID the SBOM came from,
+// or "" when no usable SBOM exists; a broken SBOM is skipped with a warning
+// so the image can still be pulled and scanned.
+func rescanFromSBOM(ctx context.Context, env Env, st store.Store, runner trivy.Runner, img inventory.RunningImage) (trivy.Scan, string, error) {
+	if _, err := store.DigestIndexPrefix(img.Digest); err != nil {
+		return trivy.Scan{}, "", nil
 	}
-	if _, err := store.DigestIndexPrefix(digest); err != nil {
-		return store.IndexEntry{}, false, nil
+	entries, err := store.SBOMEntries(ctx, st, img.Digest)
+	if err != nil {
+		return trivy.Scan{}, "", err
 	}
-	return store.LatestSBOM(ctx, st, digest)
+	for _, e := range entries {
+		sbom, err := verifiedSBOM(ctx, st, e, img.Digest)
+		if err == nil {
+			scan, scanErr := runner.ScanSBOM(ctx, sbom)
+			if scanErr == nil {
+				return scan, e.ReportID, nil
+			}
+			err = scanErr
+		}
+		fmt.Fprintf(env.Stderr, "scanproof: warning: %s: not using the SBOM from %s: %v\n", img.Reference, e.ReportID, err)
+	}
+	return trivy.Scan{}, "", nil
+}
+
+// verifiedSBOM reads an SBOM and checks it against its scan's manifest: same
+// SHA-256 and the same image digest.
+func verifiedSBOM(ctx context.Context, st store.Store, e store.IndexEntry, digest string) ([]byte, error) {
+	sbom, err := st.Get(ctx, e.ScanPrefix+sbomFile)
+	if err != nil {
+		return nil, err
+	}
+	manifestData, err := st.Get(ctx, e.ScanPrefix+manifestFile)
+	if err != nil {
+		return nil, err
+	}
+	m, err := report.VerifyAgainstManifest(manifestData, sbomFile, sbom)
+	if err != nil {
+		return nil, err
+	}
+	if m.ImageDigest != digest {
+		return nil, fmt.Errorf("the scan is of %s, not %s", m.ImageDigest, digest)
+	}
+	return sbom, nil
 }
 
 // sendRescanNotification posts one summary for the whole run.
