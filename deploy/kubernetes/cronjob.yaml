@@ -1,4 +1,6 @@
 # Rescans every running image once a day and stores the results.
+# Optionally it also rescans directories listed in images.txt (see
+# docs/directories.md).
 # Before applying: set the image tag, the store URL, and the scanproof-store
 # and scanproof-registry secrets described in docs/rescan.md.
 apiVersion: batch/v1
@@ -38,6 +40,11 @@ spec:
               args:
                 - rescan
                 - --inventory=kubernetes
+                # Optional: also rescan the images and directories listed in
+                # images.txt in the scanproof-config ConfigMap. Replace the
+                # line above with these two:
+                # - --inventory=kubernetes,file
+                # - --images-file=/config/images.txt
                 - --store=s3://acme-scan-evidence/prod
                 - --exceptions=/config/exceptions.yaml
                 - --out=/work/out

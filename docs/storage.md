@@ -19,12 +19,13 @@ Each scan is saved under the UTC day it ran:
     results.json      every finding, the policy result and the CI context
     summary.md        the job summary
     report.pdf        the auditor report (when Typst is available)
-    sbom.cdx.json     the image's packages, used by rescans
+    sbom.cdx.json     the image's (or directory's) packages, used by rescans
     manifest.json     SHA-256 of every file above
 
 <prefix>/index/digests/sha256/<digest>/SR-20261124-7F3A9C.json
-                      points from the image digest to the scan, so a rescan
-                      can find the newest SBOM without listing every day
+                      points from the image digest (or a directory's tree
+                      digest) to the scan, so a rescan can find the newest
+                      SBOM without listing every day
 ```
 
 With `--save`, period summaries are saved next to the scans:

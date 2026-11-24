@@ -71,6 +71,20 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/out:/out" -v "$PWD/store:/store" \
             scanproof:ci rescan --store file:///store --inventory file --images-file /out/images.txt --out /out/rescan
           grep -l '"method": "sbom"' out/rescan/*/results.json
+      - name: Scan a directory and rescan it from its stored SBOM
+        run: |
+          meta=dir/venv/lib/python3.12/site-packages/urllib3-1.26.4.dist-info
+          mkdir -p "$meta"
+          printf 'Metadata-Version: 2.1\nName: urllib3\nVersion: 1.26.4\n' > "$meta/METADATA"
+          docker run --rm -v "$PWD/dir:/scan/dir:ro" -v "$PWD/out:/out" -v "$PWD/store:/store" \
+            scanproof:ci scan --dir --name example-venv --version 1 --out /out/dir --store file:///store /scan/dir
+          jq -e '.artifact_type == "directory" and any(.vulnerabilities[]; .package == "urllib3")' out/dir/results.json
+          test -s out/dir/report.pdf && test -s out/dir/sbom.cdx.json
+          echo "dir:example-venv:1@$(jq -r .directory.tree_digest out/dir/results.json) ci-runner" > out/dirs.txt
+          docker run --rm -v "$PWD/out:/out" -v "$PWD/store:/store" \
+            scanproof:ci rescan --store file:///store --inventory file --images-file /out/dirs.txt --out /out/dir-rescan
+          jq -e '.artifact_type == "directory" and .runtime.method == "sbom" and any(.vulnerabilities[]; .package == "urllib3")' \
+            out/dir-rescan/*/results.json
       - name: Build a period summary from the stored scan
         run: |
           today=$(date -u +%F)
