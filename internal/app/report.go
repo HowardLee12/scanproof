@@ -19,6 +19,7 @@ import (
 const (
 	summaryJSON     = "summary.json"
 	populationCSV   = "population.csv"
+	findingsCSV     = "findings.csv"
 	summaryMarkdown = "summary.md"
 	summaryPDF      = "summary.pdf"
 	dateLayout      = "2006-01-02"
@@ -45,7 +46,7 @@ func parseReportOptions(args []string, stderr io.Writer) (reportOptions, error) 
 	fs.StringVar(&to, "to", "", "last day of the period, YYYY-MM-DD (required)")
 	fs.IntVar(&opts.LookbackDays, "lookback-days", 90, "days before the period to read, to date findings already open at the start")
 	fs.StringVar(&opts.PolicyPath, "policy", "", "policy file with sla_days (default: 15/30/90 days for Critical/High/Medium)")
-	fs.StringVar(&opts.OutDir, "out", "scanproof-summary", "directory for summary.json, population.csv, summary.md, summary.pdf and manifest.json")
+	fs.StringVar(&opts.OutDir, "out", "scanproof-summary", "directory for summary.json, population.csv, findings.csv, summary.md, summary.pdf and manifest.json")
 	fs.BoolVar(&opts.PDF, "pdf", true, "write summary.pdf (needs typst)")
 	fs.StringVar(&opts.TypstBin, "typst", "typst", "path to the typst binary")
 	fs.BoolVar(&opts.Save, "save", false, "also save the summary to the store under summaries/")
@@ -137,37 +138,13 @@ func writeSummary(ctx context.Context, opts reportOptions, env Env, s summary.Su
 		return nil, fmt.Errorf("remove old %s: %w", summaryPDF, err)
 	}
 
-	csv, err := summary.PopulationCSV(s.Population)
+	md := summary.Markdown(s)
+	written, err := writeSummaryData(opts.OutDir, s, md)
 	if err != nil {
 		return nil, err
 	}
-	if err := report.WriteFile(path(populationCSV), csv); err != nil {
-		return nil, err
-	}
-	if err := report.WriteJSON(path(summaryJSON), s); err != nil {
-		return nil, err
-	}
-	md := summary.Markdown(s)
-	if err := report.WriteFile(path(summaryMarkdown), []byte(md)); err != nil {
-		return nil, err
-	}
-	written := []string{summaryJSON, populationCSV, summaryMarkdown}
-
-	if opts.PDF {
-		hashes := map[string]string{}
-		for _, name := range []string{populationCSV, summaryJSON} {
-			if h, _, err := report.HashFile(path(name)); err == nil {
-				hashes[name] = h
-			}
-		}
-		renderer := report.NewPDFRenderer(opts.TypstBin)
-		if !renderer.Available() {
-			fmt.Fprintf(env.Stderr, "scanproof: warning: %s not found; skipping %s\n", opts.TypstBin, summaryPDF)
-		} else if err := summary.RenderPDF(ctx, renderer, s, hashes, path(summaryPDF)); err != nil {
-			fmt.Fprintf(env.Stderr, "scanproof: warning: %v; skipping %s\n", err, summaryPDF)
-		} else {
-			written = append(written, summaryPDF)
-		}
+	if opts.PDF && renderSummaryPDF(ctx, opts, env, s) {
+		written = append(written, summaryPDF)
 	}
 
 	manifest, err := report.BuildManifestFor(opts.OutDir, s.SummaryID, s.GeneratedAt, "", written)
@@ -179,4 +156,51 @@ func writeSummary(ctx context.Context, opts reportOptions, env Env, s summary.Su
 	}
 	writeGitHubStepSummary(env, env.Getenv("GITHUB_STEP_SUMMARY"), md)
 	return append(written, manifestFile), nil
+}
+
+// writeSummaryData writes summary.json, the two CSV files and summary.md,
+// and returns their names in the order the manifest lists them.
+func writeSummaryData(dir string, s summary.Summary, md string) ([]string, error) {
+	population, err := summary.PopulationCSV(s.Population)
+	if err != nil {
+		return nil, err
+	}
+	findings, err := summary.FindingsCSV(s.Findings)
+	if err != nil {
+		return nil, err
+	}
+	if err := report.WriteJSON(filepath.Join(dir, summaryJSON), s); err != nil {
+		return nil, err
+	}
+	files := []struct {
+		name string
+		data []byte
+	}{{populationCSV, population}, {findingsCSV, findings}, {summaryMarkdown, []byte(md)}}
+	for _, f := range files {
+		if err := report.WriteFile(filepath.Join(dir, f.name), f.data); err != nil {
+			return nil, err
+		}
+	}
+	return []string{summaryJSON, populationCSV, findingsCSV, summaryMarkdown}, nil
+}
+
+// renderSummaryPDF writes summary.pdf with the SHA-256 of the data files
+// printed in it. It warns and returns false when the PDF cannot be made.
+func renderSummaryPDF(ctx context.Context, opts reportOptions, env Env, s summary.Summary) bool {
+	hashes := map[string]string{}
+	for _, name := range []string{populationCSV, findingsCSV, summaryJSON} {
+		if h, _, err := report.HashFile(filepath.Join(opts.OutDir, name)); err == nil {
+			hashes[name] = h
+		}
+	}
+	renderer := report.NewPDFRenderer(opts.TypstBin)
+	if !renderer.Available() {
+		fmt.Fprintf(env.Stderr, "scanproof: warning: %s not found; skipping %s\n", opts.TypstBin, summaryPDF)
+		return false
+	}
+	if err := summary.RenderPDF(ctx, renderer, s, hashes, filepath.Join(opts.OutDir, summaryPDF)); err != nil {
+		fmt.Fprintf(env.Stderr, "scanproof: warning: %v; skipping %s\n", err, summaryPDF)
+		return false
+	}
+	return true
 }
