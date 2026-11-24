@@ -1,6 +1,7 @@
 package trivy
 
 import (
+	"fmt"
 	"path"
 	"slices"
 	"strings"
@@ -22,6 +23,23 @@ var (
 	secretSkipFiles = []string{"go.mod", "go.sum", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Pipfile.lock", "Gemfile.lock"}
 	secretSkipExts  = []string{".jpg", ".png", ".gif", ".doc", ".pdf", ".bin", ".svg", ".socket", ".deb", ".rpm", ".zip", ".gz", ".gzip", ".tar"}
 )
+
+// ModelledVersion is the Trivy version whose skip rules and allow rules
+// ScanProof models. The image pins this version.
+const ModelledVersion = "0.76.2"
+
+// VersionCaveat says, when a scan used another Trivy version than the one
+// modelled, that the lists of skipped files may be wrong; "" otherwise.
+func VersionCaveat(version string) string {
+	if strings.TrimPrefix(version, "v") == ModelledVersion {
+		return ""
+	}
+	used := "an unknown Trivy version"
+	if version != "" {
+		used = "Trivy " + version
+	}
+	return fmt.Sprintf("What Trivy skips is modelled for Trivy %s; this scan used %s, which may skip other files.", ModelledVersion, used)
+}
 
 const (
 	// BinaryHeadBytes is how much of a file the binary check looks at.
@@ -73,7 +91,7 @@ func Coverage(entries []tree.Entry, binary func(path string) bool) model.Coverag
 	for _, root := range order {
 		skipped = skipped.add(notScanned[root])
 	}
-	return model.Coverage{NotScanned: skipped.UncheckedPaths, SecretsNotChecked: secrets.UncheckedPaths}
+	return model.Coverage{ModelledFor: ModelledVersion, NotScanned: skipped.UncheckedPaths, SecretsNotChecked: secrets.UncheckedPaths}
 }
 
 // walkerSkip returns the skipped path (a .git directory or file, or a

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/HowardLee12/scanproof/internal/model"
+	"github.com/HowardLee12/scanproof/internal/trivy"
 )
 
 // maxCoverageRows bounds the coverage tables; results.json has the rest.
@@ -18,15 +19,23 @@ func coverageOf(doc Document) *model.Coverage {
 		return nil
 	}
 	c := doc.Directory.Coverage
-	if c.NotScanned.Files+c.SecretsNotChecked.Files == 0 {
+	if c.NotScanned.Files+c.SecretsNotChecked.Files == 0 && len(c.Caveats) == 0 {
 		return nil
 	}
 	return c
 }
 
+// coverageCaveats are the reasons the coverage lists may be incomplete.
+func coverageCaveats(c *model.Coverage) []string {
+	if c == nil {
+		return []string{}
+	}
+	return append([]string{}, c.Caveats...)
+}
+
 // notCheckedSummary is one line for the directory table.
 func notCheckedSummary(c *model.Coverage) string {
-	if c == nil {
+	if c == nil || c.NotScanned.Files+c.SecretsNotChecked.Files == 0 {
 		return ""
 	}
 	parts := []string{}
@@ -107,7 +116,22 @@ func secretsNone(doc Document) string {
 		}
 		return note
 	}
-	return "No keys, tokens or passwords were found in the files Trivy's secret scanner reads. " + imageSecretSkips
+	return "No keys, tokens or passwords were found in the files Trivy's secret scanner reads."
+}
+
+// imageSecretNote says which files an image's secret scan did not read,
+// and whether that is modelled for the Trivy version that ran. Directory
+// scans list those files instead; imported reports and SBOM rescans did no
+// secret scan of their own.
+func imageSecretNote(doc Document) string {
+	if doc.IsDirectory() || doc.Scanner.Imported || (doc.Runtime != nil && doc.Runtime.Method == MethodSBOM) {
+		return ""
+	}
+	note := imageSecretSkips
+	if caveat := trivy.VersionCaveat(doc.Scanner.Version); caveat != "" {
+		note += " " + caveat
+	}
+	return note
 }
 
 // imageSecretSkips says which files Trivy 0.76.2's secret scanner does not

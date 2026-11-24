@@ -92,13 +92,9 @@ func writeSeverityCounts(b *strings.Builder, s Summary) {
 // writeImageSecretNote says which files an image's secret scan skipped;
 // directory scans list them instead (see writeNotChecked).
 func writeImageSecretNote(b *strings.Builder, doc Document) {
-	if doc.IsDirectory() || doc.Scanner.Imported {
-		return
+	if note := imageSecretNote(doc); note != "" {
+		fmt.Fprintf(b, "<sub>%s</sub>\n\n", note)
 	}
-	if doc.Runtime != nil && doc.Runtime.Method == MethodSBOM {
-		return
-	}
-	fmt.Fprintf(b, "<sub>%s</sub>\n\n", imageSecretSkips)
 }
 
 func writeViolations(b *strings.Builder, findings []policy.VulnerabilityFinding) {
@@ -212,6 +208,9 @@ func writeNotChecked(b *strings.Builder, c *model.Coverage) {
 	if n := c.SecretsNotChecked.Files; n > 0 {
 		fmt.Fprintf(b, "%s not checked for secrets: %s. results.json lists them.\n\n",
 			plural(n, "file was", "files were"), cell(byReason(c.SecretsNotChecked.ByReason)))
+	}
+	for _, caveat := range c.Caveats {
+		fmt.Fprintf(b, "⚠️ %s\n\n", cell(caveat))
 	}
 }
 

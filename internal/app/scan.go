@@ -110,8 +110,14 @@ func scanTarget(ctx context.Context, opts scanOptions, env Env) (trivy.Scan, err
 	}
 	opts = withMalwarePlatform(opts)
 	scan, err := scanImage(ctx, opts)
-	if err != nil || !opts.Malware.Enabled {
+	if err != nil {
 		return scan, err
+	}
+	if c := trivy.VersionCaveat(scan.Result.Scanner.Version); c != "" && !scan.Result.Scanner.Imported {
+		fmt.Fprintf(env.Stderr, "scanproof: warning: %s\n", c)
+	}
+	if !opts.Malware.Enabled {
+		return scan, nil
 	}
 	m, err := scanMalware(ctx, opts, env)
 	if err != nil {

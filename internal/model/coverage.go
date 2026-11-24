@@ -4,6 +4,11 @@ package model
 // not read. ScanProof works it out from the directory listing and the skip
 // rules of the Trivy version it ships (see docs/directories.md#limits).
 type Coverage struct {
+	// ModelledFor is the Trivy version whose skip rules the lists follow.
+	ModelledFor string `json:"modelled_for"`
+	// Caveats say why the lists, or the scan, may not be complete: a
+	// different Trivy version, or a parent directory others can change.
+	Caveats []string `json:"caveats,omitempty"`
 	// NotScanned are paths Trivy skips entirely: they were checked for
 	// neither vulnerabilities nor secrets.
 	NotScanned UncheckedPaths `json:"not_scanned"`

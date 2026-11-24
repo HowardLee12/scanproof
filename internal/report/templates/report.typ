@@ -133,8 +133,12 @@
   )
 }
 
-#if d.not_scanned.len() > 0 or d.secrets_skipped.len() > 0 {
+#if d.not_scanned.len() > 0 or d.secrets_skipped.len() > 0 or d.coverage_caveats.len() > 0 {
   section("Coverage")
+  for caveat in d.coverage_caveats {
+    note(text(weight: "bold", fill: amber, caveat))
+    linebreak()
+  }
   if d.not_scanned.len() > 0 {
     note[Trivy did not read these paths, so they were checked for neither vulnerabilities nor secrets.]
     data-table((1fr, 14mm, 70mm), ("Not checked", "Files", "Reason"), d.not_scanned, aligns: (left, right, left))
@@ -154,6 +158,10 @@
 #if d.secrets.len() > 0 {
   data-table((38mm, 1fr, 1fr, 30mm), ("Rule", "Title", "Location", "Status"), d.secrets)
   note[The matched text is never stored or printed.]
+}
+#if d.secrets_skips != "" {
+  linebreak()
+  note(d.secrets_skips)
 }
 
 #if d.malware {

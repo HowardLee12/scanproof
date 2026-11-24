@@ -46,6 +46,8 @@ type pdfView struct {
 	IntegrityRows      []pdfRow   `json:"integrity_rows"`
 	SecretsNote        string     `json:"secrets_note"`
 	SecretsNone        string     `json:"secrets_none"`
+	SecretsSkips       string     `json:"secrets_skips"`
+	CoverageCaveats    []string   `json:"coverage_caveats"`
 	NotScanned         [][]string `json:"not_scanned"`
 	SecretsSkipped     [][]string `json:"secrets_skipped"`
 	SecretsSkippedNote string     `json:"secrets_skipped_note"`
@@ -133,6 +135,8 @@ func newPDFView(doc Document, resultsSHA256 string) pdfView {
 		IntegrityRows:      integrityRows(doc, resultsSHA256),
 		SecretsNote:        secretsNote(doc),
 		SecretsNone:        secretsNone(doc),
+		SecretsSkips:       imageSecretNote(doc),
+		CoverageCaveats:    coverageCaveats(coverageOf(doc)),
 		NotScanned:         notScannedRows(coverageOf(doc)),
 		SecretsSkipped:     secretsSkippedRows(coverageOf(doc)),
 		SecretsSkippedNote: secretsSkippedNote(coverageOf(doc)),

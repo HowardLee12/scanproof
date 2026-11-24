@@ -47,7 +47,21 @@ func scanDirectory(ctx context.Context, opts scanOptions, env Env) (trivy.Scan, 
 		return trivy.Scan{}, fmt.Errorf("%s was read before and after Trivy and differed: %w", root, err)
 	}
 	coverage := trivy.Coverage(before.Entries, func(p string) bool { return binary[p] })
+	coverage.Caveats = directoryCaveats(env, root, scan.Result.Scanner.Version)
 	return trivy.Scan{Result: directoryResult(scan.Result, opts.Dir, root, before, malware, coverage), Raw: scan.Raw}, nil
+}
+
+// directoryCaveats are the reasons the evidence of a directory scan may be
+// incomplete. Each is also printed as a warning.
+func directoryCaveats(env Env, root, trivyVersion string) []string {
+	caveats := ancestorWarnings(ancestorsOf(root), currentUID())
+	if c := trivy.VersionCaveat(trivyVersion); c != "" {
+		caveats = append(caveats, c)
+	}
+	for _, c := range caveats {
+		fmt.Fprintf(env.Stderr, "scanproof: warning: %s\n", c)
+	}
+	return caveats
 }
 
 // sniffBinary records the files whose first bytes make Trivy's secret

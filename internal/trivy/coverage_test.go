@@ -157,3 +157,20 @@ func TestCoverageOfDirectoriesReadsWhatAllowRulesWouldSkip(t *testing.T) {
 		t.Fatalf("coverage = %+v", c)
 	}
 }
+
+func TestVersionCaveat(t *testing.T) {
+	for _, v := range []string{ModelledVersion, "v" + ModelledVersion} {
+		if got := VersionCaveat(v); got != "" {
+			t.Errorf("%s: no caveat expected, got %q", v, got)
+		}
+	}
+	if got := VersionCaveat("0.77.0"); !strings.Contains(got, "Trivy "+ModelledVersion) || !strings.Contains(got, "Trivy 0.77.0") {
+		t.Errorf("got %q", got)
+	}
+	if got := VersionCaveat(""); !strings.Contains(got, "an unknown Trivy version") {
+		t.Errorf("got %q", got)
+	}
+	if c := Coverage(nil, func(string) bool { return false }); c.ModelledFor != ModelledVersion {
+		t.Errorf("coverage must say which Trivy version it models: %+v", c)
+	}
+}

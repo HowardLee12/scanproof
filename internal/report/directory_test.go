@@ -256,14 +256,14 @@ func TestPDFViewListsWhatWasNotChecked(t *testing.T) {
 	if !strings.Contains(v.SecretsNone, "files Trivy's secret scanner reads") {
 		t.Errorf("the none-found note must not claim every file was read: %q", v.SecretsNone)
 	}
-	if image := newPDFView(sampleDocument(t), ""); !strings.Contains(image.SecretsNone, "binary files") {
-		t.Errorf("image note = %q", image.SecretsNone)
+	if image := newPDFView(sampleDocument(t), ""); !strings.Contains(image.SecretsSkips, "binary files") {
+		t.Errorf("image note = %q", image.SecretsSkips)
 	}
 }
 
 func TestImageSecretNotesNameTrivysAllowRules(t *testing.T) {
 	doc := sampleDocument(t)
-	for name, text := range map[string]string{"pdf": newPDFView(doc, "").SecretsNone, "markdown": Markdown(doc)} {
+	for name, text := range map[string]string{"pdf": newPDFView(doc, "").SecretsSkips, "markdown": Markdown(doc)} {
 		for _, want := range []string{"test", "example", "Markdown", "locale", "vendor", "usr/share", "usr/local/go",
 			"opt/yarn-v", ".git", "node_modules", "lock files", "binary"} {
 			if !strings.Contains(text, want) {
@@ -273,5 +273,39 @@ func TestImageSecretNotesNameTrivysAllowRules(t *testing.T) {
 	}
 	if md := Markdown(sampleDirectoryDocument(t)); strings.Contains(md, "allow rules apply") {
 		t.Error("directory scans switch the allow rules off")
+	}
+}
+
+func TestCaveatsAreShown(t *testing.T) {
+	doc := withCoverage(sampleDirectoryDocument(t))
+	doc.Directory.Coverage.Caveats = []string{"Coverage is modelled for Trivy 0.76.2; this scan used Trivy 0.77.0."}
+	if md := Markdown(doc); !strings.Contains(md, "used Trivy 0.77.0") {
+		t.Errorf("summary.md must show the caveat:\n%s", md)
+	}
+	if v := newPDFView(doc, ""); len(v.CoverageCaveats) != 1 || !strings.Contains(v.CoverageCaveats[0], "0.77.0") {
+		t.Errorf("caveats = %v", v.CoverageCaveats)
+	}
+	// A caveat alone still shows the section.
+	only := sampleDirectoryDocument(t)
+	only.Directory.Coverage = &model.Coverage{Caveats: []string{"A parent directory can be changed by others."}}
+	if md := Markdown(only); !strings.Contains(md, "### Not checked") || !strings.Contains(md, "parent directory") {
+		t.Errorf("summary.md = %s", md)
+	}
+}
+
+func TestImageSecretNoteIsAlwaysShownAndNamesTheVersion(t *testing.T) {
+	doc := sampleDocument(t)
+	doc.Secrets = []policy.SecretFinding{{Secret: model.Secret{RuleID: "github-pat", Target: "app/x", Line: 1}, Violation: true}}
+	if v := newPDFView(doc, ""); !strings.Contains(v.SecretsSkips, "allow rules") {
+		t.Errorf("the PDF must say what the secret scan skipped even when it found secrets: %q", v.SecretsSkips)
+	}
+	doc.Scanner.Version = "0.77.0"
+	for name, text := range map[string]string{"pdf": newPDFView(doc, "").SecretsSkips, "markdown": Markdown(doc)} {
+		if !strings.Contains(text, "this scan used Trivy 0.77.0") {
+			t.Errorf("%s must say the note is modelled for another Trivy version:\n%s", name, text)
+		}
+	}
+	if v := newPDFView(sampleDirectoryDocument(t), ""); v.SecretsSkips != "" {
+		t.Errorf("directories list what was skipped instead: %q", v.SecretsSkips)
 	}
 }
