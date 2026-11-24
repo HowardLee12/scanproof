@@ -90,10 +90,17 @@ func TestIsBinaryMatchesTrivy(t *testing.T) {
 func TestScansPinTheSecretConfig(t *testing.T) {
 	var path string
 	exec := func(_ string, args []string) {
+		path = ""
 		for i, a := range args {
 			if a == "--secret-config" {
 				path = args[i+1]
 			}
+		}
+		if args[0] == "sbom" {
+			if path != "" {
+				t.Errorf("trivy sbom has no --secret-config flag (Trivy 0.76.2 rejects it): %v", args)
+			}
+			return
 		}
 		if path == "" {
 			t.Fatalf("no --secret-config in %v", args)
@@ -106,7 +113,6 @@ func TestScansPinTheSecretConfig(t *testing.T) {
 		}
 	}
 	for _, scan := range scanFuncs(t, exec) {
-		path = ""
 		scan()
 		if path != "" {
 			if _, err := os.Stat(strings.TrimSuffix(path, "/trivy-secret.yaml")); !os.IsNotExist(err) {
