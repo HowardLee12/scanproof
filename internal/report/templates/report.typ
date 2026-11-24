@@ -133,6 +133,18 @@
   )
 }
 
+#if d.not_scanned.len() > 0 or d.secrets_skipped.len() > 0 {
+  section("Coverage")
+  if d.not_scanned.len() > 0 {
+    note[Trivy did not read these paths, so they were checked for neither vulnerabilities nor secrets.]
+    data-table((1fr, 14mm, 70mm), ("Not checked", "Files", "Reason"), d.not_scanned, aligns: (left, right, left))
+  }
+  if d.secrets_skipped.len() > 0 {
+    note(d.secrets_skipped_note)
+    data-table((1fr, 50mm), ("Not checked for secrets", "Reason"), d.secrets_skipped)
+  }
+}
+
 #section("Secrets", note: str(d.secrets.len()) + " found")
 #if d.secrets_note != "" {
   note(d.secrets_note)

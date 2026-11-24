@@ -133,7 +133,7 @@ func TestPDFViewForADirectory(t *testing.T) {
 	if !strings.Contains(v.CC68Text, "directory") || strings.Contains(v.CC68Text, "layer") {
 		t.Errorf("CC6.8 = %q", v.CC68Text)
 	}
-	if !strings.Contains(v.SecretsNone, "directory") {
+	if !strings.Contains(v.SecretsNone, "secret scanner reads") || strings.Contains(v.SecretsNone, "Coverage") {
 		t.Errorf("secrets text = %q", v.SecretsNone)
 	}
 }
@@ -207,5 +207,56 @@ func TestSkippedRowsKeepTheirColumnCount(t *testing.T) {
 		if last := rows[len(rows)-1][0]; last != "5 more in results.json" {
 			t.Errorf("last row = %q", last)
 		}
+	}
+}
+
+func withCoverage(doc Document) Document {
+	doc.Directory.Coverage = &model.Coverage{
+		NotScanned: model.UncheckedPaths{Files: 3, Paths: []model.UncheckedPath{
+			{Path: "src/pkg/.git", Files: 2, Reason: "Trivy skips .git"},
+			{Path: "dev", Files: 1, Reason: "Trivy skips dev, proc and sys at the top of the directory"},
+		}},
+		SecretsNotChecked: model.UncheckedPaths{Files: 120, ByReason: map[string]int{"binary file": 100, "file type .bin": 20},
+			Paths: []model.UncheckedPath{{Path: "lib/libx.so", Files: 1, Reason: "binary file"}}, Omitted: 119},
+	}
+	return doc
+}
+
+func TestMarkdownListsWhatWasNotChecked(t *testing.T) {
+	md := Markdown(withCoverage(sampleDirectoryDocument(t)))
+	for _, want := range []string{
+		"### Not checked",
+		"3 files were not checked for vulnerabilities or secrets",
+		"`src/pkg/.git` (2 files, Trivy skips .git)",
+		"120 files were not checked for secrets: binary file 100, file type .bin 20",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("summary is missing %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(Markdown(sampleDirectoryDocument(t)), "### Not checked") {
+		t.Error("nothing to say when every file was checked")
+	}
+}
+
+func TestPDFViewListsWhatWasNotChecked(t *testing.T) {
+	v := newPDFView(withCoverage(sampleDirectoryDocument(t)), "")
+	if !hasRow(v.ArtifactRows, "Not checked", "3 files not checked for vulnerabilities or secrets · 120 files not checked for secrets (see Coverage)") {
+		t.Errorf("artifact rows = %+v", v.ArtifactRows)
+	}
+	if len(v.NotScanned) != 2 || v.NotScanned[0][0] != "src/pkg/.git" || v.NotScanned[0][1] != "2" {
+		t.Errorf("not scanned rows = %v", v.NotScanned)
+	}
+	if !strings.Contains(v.SecretsSkippedNote, "120 files") || !strings.Contains(v.SecretsSkippedNote, "binary file 100") {
+		t.Errorf("secrets note = %q", v.SecretsSkippedNote)
+	}
+	if len(v.SecretsSkipped) != 2 || v.SecretsSkipped[1][0] != "119 more in results.json" {
+		t.Errorf("secrets skipped rows = %v", v.SecretsSkipped)
+	}
+	if !strings.Contains(v.SecretsNone, "files Trivy's secret scanner reads") {
+		t.Errorf("the none-found note must not claim every file was read: %q", v.SecretsNone)
+	}
+	if image := newPDFView(sampleDocument(t), ""); !strings.Contains(image.SecretsNone, "skips binary files") {
+		t.Errorf("image note = %q", image.SecretsNone)
 	}
 }

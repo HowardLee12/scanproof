@@ -30,6 +30,7 @@ func Markdown(doc Document) string {
 	writeViolations(&b, doc.Vulnerabilities)
 	writeSecrets(&b, doc.Secrets)
 	writeMalware(&b, doc.Malware, doc.IsDirectory())
+	writeNotChecked(&b, coverageOf(doc))
 	writeExceptions(&b, doc.Exceptions)
 
 	fmt.Fprintf(&b, "<sub>Report %s · %s %s · scanned %s with %s · policy: %s</sub>\n",
@@ -173,6 +174,32 @@ func engineLabel(e model.MalwareEngine) string {
 		label += fmt.Sprintf(" (%s)", e.Database)
 	}
 	return label
+}
+
+// maxMarkdownPaths bounds the paths listed in the job summary.
+const maxMarkdownPaths = 10
+
+// writeNotChecked says which files of a directory Trivy did not read.
+func writeNotChecked(b *strings.Builder, c *model.Coverage) {
+	if c == nil {
+		return
+	}
+	b.WriteString("### Not checked\n\n")
+	if n := c.NotScanned.Files; n > 0 {
+		paths := []string{}
+		for i, p := range c.NotScanned.Paths {
+			if i == maxMarkdownPaths {
+				break
+			}
+			paths = append(paths, fmt.Sprintf("%s (%s, %s)", code(p.Path), plural(p.Files, "file", "files"), cell(p.Reason)))
+		}
+		fmt.Fprintf(b, "%s not checked for vulnerabilities or secrets: %s.\n\n",
+			plural(n, "file was", "files were"), strings.Join(paths, ", "))
+	}
+	if n := c.SecretsNotChecked.Files; n > 0 {
+		fmt.Fprintf(b, "%s not checked for secrets: %s. results.json lists them.\n\n",
+			plural(n, "file was", "files were"), cell(byReason(c.SecretsNotChecked.ByReason)))
+	}
 }
 
 func writeExceptions(b *strings.Builder, e Exceptions) {

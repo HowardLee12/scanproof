@@ -61,6 +61,7 @@ func directoryRows(doc Document) []pdfRow {
 		{Label: "Tree digest", Value: orText(doc.Image.Digest, d.TreeDigest), Mono: true},
 		{Label: "Scanned path", Value: d.Path, Mono: true},
 		{Label: "Contents", Value: directoryContents(d)},
+		{Label: "Not checked", Value: notCheckedSummary(coverageOf(doc))},
 		{Label: "Operating system", Value: doc.Image.OS},
 	})
 }
