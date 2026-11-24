@@ -197,7 +197,7 @@ steps:
       role-to-assume: arn:aws:iam::123456789012:role/scanproof-ci
       aws-region: us-east-2
 
-  - uses: HowardLee12/scanproof@v0.2.0
+  - uses: HowardLee12/scanproof@v0.1.0
     with:
       image: example-api:${{ github.sha }}
       store: s3://acme-scan-evidence/prod
