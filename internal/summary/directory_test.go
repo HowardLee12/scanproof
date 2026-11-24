@@ -1,6 +1,8 @@
 package summary
 
 import (
+	"bytes"
+	encodingcsv "encoding/csv"
 	"strings"
 	"testing"
 
@@ -53,9 +55,16 @@ func TestCoverageCountsDirectoriesSeparately(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(csv)
-	if !strings.Contains(text, ",rescan,directory,dir:example-worker:1,sha256:t3,") || !strings.Contains(text, ",ci,container_image,repo/api:1,") {
-		t.Errorf("population.csv must name the artifact type:\n%s", text)
+	rows, err := encodingcsv.NewReader(bytes.NewReader(csv)).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	types := map[string]string{}
+	for _, r := range rows[1:] {
+		types[r[3]] = r[len(r)-1] // image column, last column
+	}
+	if rows[0][len(rows[0])-1] != "artifact_type" || types["dir:example-worker:1"] != "directory" || types["repo/api:1"] != "container_image" {
+		t.Errorf("population.csv must end with the artifact type: %v", rows)
 	}
 }
 
