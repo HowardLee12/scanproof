@@ -210,13 +210,13 @@ The PDF maps the report to SOC 2 criteria CC7.1 and CC8.1 for convenience. Your 
 
 ## Security notes
 
-- Trivy settings files in the scanned repository (`trivy.yaml`, `.trivyignore`) and `TRIVY_*` variables that filter results are ignored. The only way to accept a finding is an exception with a reason and an expiry date. Registry login, cache and database mirror variables are still passed through.
+- Trivy settings files in the working directory, such as the scanned repository (`trivy.yaml`, `.trivyignore`, `trivy-secret.yaml`), and `TRIVY_*` variables that filter results are ignored. The only way to accept a finding is an exception with a reason and an expiry date. Registry login, cache and database mirror variables are still passed through.
 - Imported Trivy reports (`--trivy-results`) must come from `trivy image`, and the report says that secret scanning could not be verified.
 - Secret findings record the rule, file and line only. The matched text is never stored or printed.
 - Values from scan results are passed to the PDF template as data, never as template code.
 - The image pins Trivy by digest and verifies the Typst download by SHA-256.
 - The malware scan unpacks every layer's regular files under generated names in a private temporary directory, so names from the image never reach the file system or scanner output. It checks that the scanner covered every file, and deletes the directory after each layer. Directory scans copy files the same way, in batches.
-- Directory scans never follow symlinks, and stop if the directory changes while it is scanned.
+- Directory scans read only through the scanned directory (never following a symlink out of it), stop if the directory changes while it is scanned, and list the files Trivy does not read.
 
 ## Roadmap
 

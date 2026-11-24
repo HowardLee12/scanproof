@@ -24,7 +24,7 @@ scanproof rescan --store s3://acme-scan-evidence/prod --inventory kubernetes,fil
 | `--inventory` | required | `kubernetes`, `ecs` or `file`, or a comma-separated list such as `kubernetes,file`; the results are merged by digest |
 | `--namespace` | all | Kubernetes: limit to one namespace |
 | `--ecs-cluster` | all clusters | ECS: cluster name or ARN; repeat for more |
-| `--images-file` | | File: one image or directory per line (see [below](#the-images-file)); needs `file` in `--inventory` |
+| `--images-file` | | File: one image or directory per line (see [below](#the-images-file)); only read with `file` in `--inventory` (otherwise a warning) |
 | `--exceptions` | | Exceptions that apply to running images (see below) |
 | `--policy` | built-in | Policy file |
 | `--pull-missing` | `true` | Pull images that have no stored SBOM (never directories) |
@@ -32,7 +32,7 @@ scanproof rescan --store s3://acme-scan-evidence/prod --inventory kubernetes,fil
 | `--notify` | `violation` | When to post the run summary: `violation`, `always`, `never` |
 | `--timeout` | `30m` | Time limit per image or directory |
 
-The exit code is 0 when every image and directory was rescanned and 2 when any of them failed. Violations alone don't change the exit code: a rescan reports, it does not block anything.
+The exit code is 0 when every image and directory was rescanned and 2 when any of them failed, or when an inventory (or a line of the images file) could not be read. An inventory that fails does not stop the others: with `--inventory kubernetes,file`, the file is still rescanned when the Kubernetes API refuses access, and the failure is listed in the output and the chat message. Violations alone don't change the exit code: a rescan reports, it does not block anything.
 
 ### Exceptions for rescans
 
@@ -110,7 +110,7 @@ dir:acme-vllm:0.9.1@sha256:22f1…              gpu-cluster/inference/acme-vllm
 - An image line is an image reference. Pin it to a digest; then the rescan can use the stored SBOM and checks exactly what is deployed.
 - A directory line is `dir:NAME[:VERSION]@sha256:<tree digest>`. The digest is required: it is how the stored scan is found. `scanproof scan --dir` prints the line. See [directories.md](directories.md).
 - Optionally, whitespace and a free-text location follow, recorded as where the image or directory runs. Without one, the location is "listed in" and the file's path.
-- A malformed directory line stops the rescan with an error that names the line.
+- A malformed line is reported as failed, with its line number, and the other lines are still rescanned. A line that starts with `dir:` is always a directory.
 
 To rescan both what runs in Kubernetes and the entries in the file, use `--inventory kubernetes,file`. In the CronJob, put the file in the `scanproof-config` ConfigMap; [deploy/kubernetes/cronjob.yaml](../deploy/kubernetes/cronjob.yaml) has the lines to uncomment:
 
@@ -121,7 +121,7 @@ kubectl -n scanproof create configmap scanproof-config \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-A directory is always checked from its stored SBOM, verified against its manifest (same SHA-256, same tree digest, artifact type `directory`). If there is none, the line is reported as failed with "no stored scan for this directory; run scanproof scan --dir on a host that has it", in the output and in the chat message.
+A directory is always checked from its stored SBOM, verified against its manifest (same SHA-256, same tree digest, artifact type `directory`). If none was ever stored, the line is reported as failed with "no stored scan for this directory; run scanproof scan --dir on a host that has it", in the output and in the chat message. If stored scans exist but none can be used, the failure names the newest one and why, for example an SBOM that no longer matches its manifest.
 
 ## In the period summary
 
