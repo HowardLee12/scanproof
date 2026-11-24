@@ -9,14 +9,16 @@ import (
 	"github.com/HowardLee12/scanproof/internal/tree"
 )
 
-// The skip rules below were measured with Trivy 0.76.2, the version the
-// ScanProof image pins. A different Trivy version may skip other files.
+// The skip rules below are those of Trivy 0.76.2, the version the ScanProof
+// image pins, for directory scans, where ScanProof switches Trivy's secret
+// allow rules off (see noAllowRulesConfig). A different Trivy version may
+// skip other files; the CI image job checks these rules by planting secrets.
 var (
 	// walkerSkipTop are top-level directories Trivy never reads.
 	walkerSkipTop = []string{"dev", "proc", "sys"}
 	// secretSkipDirs, secretSkipFiles and secretSkipExts are what the
 	// secret scanner does not read. Extensions are case-sensitive.
-	secretSkipDirs  = []string{".git", "node_modules", "vendor"}
+	secretSkipDirs  = []string{".git", "node_modules"}
 	secretSkipFiles = []string{"go.mod", "go.sum", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Pipfile.lock", "Gemfile.lock"}
 	secretSkipExts  = []string{".jpg", ".png", ".gif", ".doc", ".pdf", ".bin", ".svg", ".socket", ".deb", ".rpm", ".zip", ".gz", ".gzip", ".tar"}
 )

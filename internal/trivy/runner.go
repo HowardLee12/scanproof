@@ -73,7 +73,7 @@ func (r Runner) Scan(ctx context.Context, image string) (Scan, error) {
 	if r.Platform != "" {
 		extra = append(extra, "--platform", r.Platform)
 	}
-	return r.scanArtifact(ctx, "image", image, extra)
+	return r.scanArtifact(ctx, "image", image, extra, absentSecretConfig)
 }
 
 // ScanRootfs scans an installed directory tree for vulnerabilities and
@@ -84,22 +84,27 @@ func (r Runner) ScanRootfs(ctx context.Context, path string) (Scan, error) {
 	if !filepath.IsAbs(strings.TrimSpace(path)) {
 		return Scan{}, fmt.Errorf("directory %q must be an absolute path", path)
 	}
-	return r.scanArtifact(ctx, "rootfs", path, nil)
+	return r.scanArtifact(ctx, "rootfs", path, nil, noAllowRulesConfig)
 }
 
 // scanArtifact runs one `trivy image` or `trivy rootfs` scan with every
 // package listed, which the SBOM for later rescans needs. A trivy-secret.yaml
 // in the working directory could switch secret rules off, so the secret
-// scanner's settings file is pinned to a path in a fresh private directory,
-// which cannot exist: Trivy then uses its built-in rules.
-func (r Runner) scanArtifact(ctx context.Context, mode, target string, extra []string) (Scan, error) {
+// scanner's settings file is always pinned to a file in a fresh private
+// directory, made by secretConfig. Its name is unique, because Trivy does
+// not read a top-level file named like its secret config.
+func (r Runner) scanArtifact(ctx context.Context, mode, target string, extra []string, secretConfig func(dir string) (string, error)) (Scan, error) {
 	settings, err := os.MkdirTemp("", "scanproof-trivy-")
 	if err != nil {
 		return Scan{}, fmt.Errorf("create trivy settings directory: %w", err)
 	}
 	defer os.RemoveAll(settings)
+	config, err := secretConfig(settings)
+	if err != nil {
+		return Scan{}, err
+	}
 	args := append([]string{mode, "--quiet", "--format", "json", "--scanners", "vuln,secret", "--list-all-pkgs",
-		"--secret-config", filepath.Join(settings, "trivy-secret.yaml")}, r.hardenedFlags()...)
+		"--secret-config", config}, r.hardenedFlags()...)
 	args = append(args, extra...)
 	out, err := r.exec(ctx, r.Bin, append(args, target)...)
 	if err != nil {

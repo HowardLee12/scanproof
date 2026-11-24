@@ -107,9 +107,17 @@ func secretsNone(doc Document) string {
 		}
 		return note
 	}
-	return "No keys, tokens or passwords were found in the files Trivy's secret scanner reads. It skips binary files, " +
-		"some file types (such as images and archives), lock files, and .git, node_modules and vendor directories."
+	return "No keys, tokens or passwords were found in the files Trivy's secret scanner reads. " + imageSecretSkips
 }
+
+// imageSecretSkips says which files Trivy 0.76.2's secret scanner does not
+// read in an image scan, where its built-in allow rules apply.
+const imageSecretSkips = "Trivy's built-in allow rules apply to image scans, so it does not read for secrets: paths with " +
+	"test or example in them (such as tests/, _test, -test, .test, examples/), Markdown files, locale and vendor " +
+	"directories, system directories (usr/share, usr/include, usr/lib), the language directories of base images " +
+	"(usr/local/go, usr/local/lib/python*, usr/lib/gems, usr/src/wordpress, opt/yarn-v*), .git and node_modules " +
+	"directories, lock files such as go.sum and package-lock.json, some file types (images, archives, PDF, .bin) " +
+	"and binary files."
 
 // pick returns yes when cond holds, otherwise no.
 func pick(cond bool, yes, no string) string {

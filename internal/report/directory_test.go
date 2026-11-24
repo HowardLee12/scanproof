@@ -256,7 +256,22 @@ func TestPDFViewListsWhatWasNotChecked(t *testing.T) {
 	if !strings.Contains(v.SecretsNone, "files Trivy's secret scanner reads") {
 		t.Errorf("the none-found note must not claim every file was read: %q", v.SecretsNone)
 	}
-	if image := newPDFView(sampleDocument(t), ""); !strings.Contains(image.SecretsNone, "skips binary files") {
+	if image := newPDFView(sampleDocument(t), ""); !strings.Contains(image.SecretsNone, "binary files") {
 		t.Errorf("image note = %q", image.SecretsNone)
+	}
+}
+
+func TestImageSecretNotesNameTrivysAllowRules(t *testing.T) {
+	doc := sampleDocument(t)
+	for name, text := range map[string]string{"pdf": newPDFView(doc, "").SecretsNone, "markdown": Markdown(doc)} {
+		for _, want := range []string{"test", "example", "Markdown", "locale", "vendor", "usr/share", "usr/local/go",
+			"opt/yarn-v", ".git", "node_modules", "lock files", "binary"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s: the image secret note must say Trivy skips %q:\n%s", name, want, text)
+			}
+		}
+	}
+	if md := Markdown(sampleDirectoryDocument(t)); strings.Contains(md, "allow rules apply") {
+		t.Error("directory scans switch the allow rules off")
 	}
 }

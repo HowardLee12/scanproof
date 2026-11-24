@@ -29,6 +29,7 @@ func Markdown(doc Document) string {
 	writeSeverityCounts(&b, doc.Summary)
 	writeViolations(&b, doc.Vulnerabilities)
 	writeSecrets(&b, doc.Secrets)
+	writeImageSecretNote(&b, doc)
 	writeMalware(&b, doc.Malware, doc.IsDirectory())
 	writeNotChecked(&b, coverageOf(doc))
 	writeExceptions(&b, doc.Exceptions)
@@ -86,6 +87,18 @@ func writeSeverityCounts(b *strings.Builder, s Summary) {
 		fmt.Fprintf(b, " (%d accepted)", s.SecretsAccepted)
 	}
 	b.WriteString("\n\n")
+}
+
+// writeImageSecretNote says which files an image's secret scan skipped;
+// directory scans list them instead (see writeNotChecked).
+func writeImageSecretNote(b *strings.Builder, doc Document) {
+	if doc.IsDirectory() || doc.Scanner.Imported {
+		return
+	}
+	if doc.Runtime != nil && doc.Runtime.Method == MethodSBOM {
+		return
+	}
+	fmt.Fprintf(b, "<sub>%s</sub>\n\n", imageSecretSkips)
 }
 
 func writeViolations(b *strings.Builder, findings []policy.VulnerabilityFinding) {

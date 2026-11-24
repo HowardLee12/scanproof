@@ -2,6 +2,7 @@ package trivy
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,8 +12,9 @@ import (
 func file(p string, size int64) tree.Entry { return tree.Entry{Path: p, Type: tree.File, Size: size} }
 func dir(p string) tree.Entry              { return tree.Entry{Path: p, Type: tree.Dir} }
 
-// The expectations below were measured with the real Trivy 0.76.2 (the
-// version the image pins): see docs/directories.md#limits.
+// These rules follow Trivy 0.76.2 (the version the image pins) for
+// directory scans, where ScanProof switches Trivy's allow rules off. The CI
+// image job checks them against the real Trivy by planting secrets.
 func TestCoverageFollowsTrivysSkipRules(t *testing.T) {
 	entries := []tree.Entry{
 		dir("dev"), file("dev/creds.txt", 50),
@@ -22,7 +24,7 @@ func TestCoverageFollowsTrivysSkipRules(t *testing.T) {
 		file("app/settings.ini", 50), file("app/tiny", 5),
 		file("app/model.bin", 5000), file("app/photo.jpg", 50), file("app/photo.JPG", 50), file("app/x.pyc", 50),
 		file("app/go.sum", 50), file("app/package-lock.json", 50),
-		file("web/node_modules/a/index.js", 50), file("go/vendor/b/b.go", 50),
+		file("web/node_modules/a/index.js", 50), file("go/vendor/b/b.go", 50), file("trivy-secret.yaml", 50),
 		file("lib/libx.so", 9000),
 	}
 	binary := func(p string) bool { return p == "lib/libx.so" }
@@ -44,17 +46,18 @@ func TestCoverageFollowsTrivysSkipRules(t *testing.T) {
 		skipped[p.Path] = p.Reason
 	}
 	for _, want := range []string{"app/model.bin", "app/photo.jpg", "app/go.sum", "app/package-lock.json",
-		"web/node_modules/a/index.js", "go/vendor/b/b.go", "lib/libx.so"} {
+		"web/node_modules/a/index.js", "lib/libx.so"} {
 		if skipped[want] == "" {
 			t.Errorf("%s should not be checked for secrets: %+v", want, c.SecretsNotChecked.Paths)
 		}
 	}
-	for _, scanned := range []string{"app/settings.ini", "app/photo.JPG", "app/x.pyc", "lib/dev/creds.txt", "app/tiny"} {
+	for _, scanned := range []string{"app/settings.ini", "app/photo.JPG", "app/x.pyc", "lib/dev/creds.txt", "app/tiny",
+		"go/vendor/b/b.go", "trivy-secret.yaml"} {
 		if skipped[scanned] != "" {
 			t.Errorf("%s is read by the secret scanner (or too small to hold a secret)", scanned)
 		}
 	}
-	if c.SecretsNotChecked.Files != 7 || c.SecretsNotChecked.ByReason["binary file"] != 1 {
+	if c.SecretsNotChecked.Files != 6 || c.SecretsNotChecked.ByReason["binary file"] != 1 {
 		t.Errorf("secrets not checked = %+v", c.SecretsNotChecked)
 	}
 }
@@ -88,36 +91,69 @@ func TestIsBinaryMatchesTrivy(t *testing.T) {
 }
 
 func TestScansPinTheSecretConfig(t *testing.T) {
-	var path string
+	seen := map[string][]string{}
 	exec := func(_ string, args []string) {
-		path = ""
+		path := ""
 		for i, a := range args {
 			if a == "--secret-config" {
 				path = args[i+1]
 			}
 		}
-		if args[0] == "sbom" {
+		seen[args[0]] = append(seen[args[0]], path)
+		switch args[0] {
+		case "sbom":
 			if path != "" {
 				t.Errorf("trivy sbom has no --secret-config flag (Trivy 0.76.2 rejects it): %v", args)
 			}
-			return
-		}
-		if path == "" {
-			t.Fatalf("no --secret-config in %v", args)
-		}
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Errorf("the pinned secret config %s must not exist, got %v", path, err)
-		}
-		if info, err := os.Stat(strings.TrimSuffix(path, "/trivy-secret.yaml")); err != nil || info.Mode().Perm() != 0o700 {
-			t.Errorf("its directory must be a fresh private one: %v %v", info, err)
-		}
-	}
-	for _, scan := range scanFuncs(t, exec) {
-		scan()
-		if path != "" {
-			if _, err := os.Stat(strings.TrimSuffix(path, "/trivy-secret.yaml")); !os.IsNotExist(err) {
-				t.Errorf("the temporary directory must be removed")
+		case "image":
+			// Trivy's own secret rules, including its allow rules.
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Errorf("the pinned secret config %s must not exist, got %v", path, err)
+			}
+		case "rootfs":
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("a directory scan needs its own secret config: %v", err)
+			}
+			for _, id := range allowRuleIDs {
+				if !strings.Contains(string(data), "  - "+id+"\n") {
+					t.Errorf("the secret config must disable the allow rule %q:\n%s", id, data)
+				}
 			}
 		}
+		if path != "" {
+			if base := filepath.Base(path); base == "trivy-secret.yaml" || !strings.HasPrefix(base, "scanproof-") {
+				t.Errorf("Trivy skips a top-level file named like the secret config, so its name must be unique: %s", base)
+			}
+			if info, err := os.Stat(filepath.Dir(path)); err != nil || info.Mode().Perm() != 0o700 {
+				t.Errorf("its directory must be a fresh private one: %v %v", info, err)
+			}
+		}
+	}
+	for i := 0; i < 2; i++ {
+		for _, scan := range scanFuncs(t, exec) {
+			scan()
+		}
+	}
+	for _, mode := range []string{"image", "rootfs"} {
+		paths := seen[mode]
+		if len(paths) != 2 || paths[0] == paths[1] || filepath.Base(paths[0]) == filepath.Base(paths[1]) {
+			t.Errorf("%s: every scan needs its own secret config name: %v", mode, paths)
+		}
+		if _, err := os.Stat(filepath.Dir(paths[0])); !os.IsNotExist(err) {
+			t.Errorf("%s: the temporary directory must be removed", mode)
+		}
+	}
+}
+
+func TestCoverageOfDirectoriesReadsWhatAllowRulesWouldSkip(t *testing.T) {
+	// Directory scans switch Trivy's allow rules off, so these are read.
+	entries := []tree.Entry{
+		file("README.md", 50), file("pkg/tests/conftest.py", 50), file("pkg/examples/a.py", 50),
+		file("pkg/locale/de/a.po", 50), file("pkg/vendor/lib.py", 50), file("vendor/top.py", 50),
+		file("usr/share/doc/a.txt", 50), file("usr/local/lib/python3.12/a.py", 50),
+	}
+	if c := Coverage(entries, func(string) bool { return false }); c.SecretsNotChecked.Files != 0 || c.NotScanned.Files != 0 {
+		t.Fatalf("coverage = %+v", c)
 	}
 }
