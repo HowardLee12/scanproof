@@ -35,6 +35,8 @@ With `--save`, period summaries are saved next to the scans:
     summary.json  population.csv  summary.md  summary.pdf  manifest.json
 ```
 
+If an upload fails, the run exits with 2 and the files stay in `--out` (`results.json`, `summary.md`, `manifest.json`, and the PDF and SBOM if they were made), so you can see what was not stored; nothing is written to the GitHub job summary. If the scan folder was stored but its digest index entry could not be written, the error says "report SR-… is stored but not indexed, so rescans will not find it" and names the folder; scan again to get a stored and indexed scan.
+
 The store is **write-once**. ScanProof never overwrites or deletes anything. Every upload uses a conditional write (`If-None-Match: *`), so the store rejects a second write to the same key.
 
 ## Store URLs
