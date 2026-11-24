@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -39,17 +40,21 @@ func TestRunnerScanRunsTrivyAndAddsDatabaseTime(t *testing.T) {
 	}}
 	r := Runner{Bin: "/usr/bin/trivy", exec: fake.run}
 
-	res, err := r.Scan(context.Background(), "alpine:3.18.0")
+	scan, err := r.Scan(context.Background(), "alpine:3.18.0")
 	if err != nil {
 		t.Fatal(err)
+	}
+	res := scan.Result
+	if len(scan.Raw) == 0 {
+		t.Error("the raw Trivy report is needed to build the SBOM")
 	}
 	if len(fake.calls) != 2 {
 		t.Fatalf("expected 2 trivy calls, got %d", len(fake.calls))
 	}
-	scan := strings.Join(fake.calls[0], " ")
-	for _, want := range []string{"/usr/bin/trivy image", "--format json", "--scanners vuln,secret", "alpine:3.18.0"} {
-		if !strings.Contains(scan, want) {
-			t.Errorf("scan command %q is missing %q", scan, want)
+	cmd := strings.Join(fake.calls[0], " ")
+	for _, want := range []string{"/usr/bin/trivy image", "--format json", "--scanners vuln,secret", "--list-all-pkgs", "alpine:3.18.0"} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("scan command %q is missing %q", cmd, want)
 		}
 	}
 	if res.Scanner.DBUpdatedAt == nil {
@@ -88,11 +93,11 @@ func TestRunnerKeepsScanWhenVersionLookupFails(t *testing.T) {
 		}
 		return readFixture(t, "trivy-alpine-3.18.0.json"), nil
 	}
-	res, err := Runner{Bin: "trivy", exec: exec}.Scan(context.Background(), "alpine:3.18.0")
+	scan, err := Runner{Bin: "trivy", exec: exec}.Scan(context.Background(), "alpine:3.18.0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Scanner.DBUpdatedAt != nil {
+	if scan.Result.Scanner.DBUpdatedAt != nil {
 		t.Error("database time should be empty when `trivy version` fails")
 	}
 }
@@ -159,4 +164,53 @@ func TestDefaultExecDoesNotPassTrivySettings(t *testing.T) {
 	if err != nil || string(out) != "" {
 		t.Fatalf("TRIVY_SEVERITY leaked into the child process: %q %v", out, err)
 	}
+}
+
+func TestSBOMConvertsTheRawReport(t *testing.T) {
+	var gotArgs []string
+	var gotInput []byte
+	exec := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		gotArgs = args
+		in, err := os.ReadFile(args[len(args)-1])
+		if err != nil {
+			return nil, err
+		}
+		gotInput = in
+		out := args[indexOf(args, "--output")+1]
+		return nil, os.WriteFile(out, []byte(`{"bomFormat":"CycloneDX"}`), 0o600)
+	}
+	sbom, err := Runner{Bin: "trivy", exec: exec}.SBOM(context.Background(), []byte(`{"SchemaVersion":2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(sbom) != `{"bomFormat":"CycloneDX"}` || string(gotInput) != `{"SchemaVersion":2}` {
+		t.Fatalf("sbom %s, input %s", sbom, gotInput)
+	}
+	if gotArgs[0] != "convert" || !strings.Contains(strings.Join(gotArgs, " "), "--format cyclonedx") {
+		t.Errorf("args = %v", gotArgs)
+	}
+	if dir := filepath.Dir(gotArgs[len(gotArgs)-1]); dirExists(dir) {
+		t.Error("the temporary directory should be removed")
+	}
+}
+
+func TestSBOMReportsFailure(t *testing.T) {
+	exec := func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("convert failed") }
+	if _, err := (Runner{Bin: "trivy", exec: exec}).SBOM(context.Background(), []byte("{}")); err == nil {
+		t.Fatal("expected an error")
+	}
+}
+
+func indexOf(list []string, s string) int {
+	for i, v := range list {
+		if v == s {
+			return i
+		}
+	}
+	return -1
+}
+
+func dirExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
 }

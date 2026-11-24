@@ -47,6 +47,33 @@ type Policy struct {
 	FixableOnly bool
 	// BlockSecrets makes every embedded secret a violation.
 	BlockSecrets bool
+	// SLA is the number of days to fix a vulnerability once a fix exists.
+	// Zero means no deadline. Period summaries measure remediation with it.
+	SLADays SLADays
+}
+
+// SLADays holds the remediation deadline per severity, in days.
+type SLADays struct {
+	Critical int
+	High     int
+	Medium   int
+	Low      int
+}
+
+// SLA returns the remediation deadline in days for a severity, or 0.
+func (p Policy) SLA(sev model.Severity) int {
+	switch sev {
+	case model.SeverityCritical:
+		return p.SLADays.Critical
+	case model.SeverityHigh:
+		return p.SLADays.High
+	case model.SeverityMedium:
+		return p.SLADays.Medium
+	case model.SeverityLow:
+		return p.SLADays.Low
+	default:
+		return 0
+	}
 }
 
 // Default warns about fixable Critical vulnerabilities and any secret.
@@ -56,6 +83,7 @@ func Default() Policy {
 		MinSeverity:  model.SeverityCritical,
 		FixableOnly:  true,
 		BlockSecrets: true,
+		SLADays:      SLADays{Critical: 15, High: 30, Medium: 90},
 	}
 }
 
@@ -72,6 +100,12 @@ type rawPolicy struct {
 		FixableOnly *bool   `yaml:"fixable_only"`
 		Secrets     *bool   `yaml:"secrets"`
 	} `yaml:"fail_on"`
+	SLADays struct {
+		Critical *int `yaml:"critical"`
+		High     *int `yaml:"high"`
+		Medium   *int `yaml:"medium"`
+		Low      *int `yaml:"low"`
+	} `yaml:"sla_days"`
 }
 
 // Parse reads a policy document. Fields that are not given keep their
@@ -104,6 +138,24 @@ func Parse(data []byte) (Policy, error) {
 	}
 	if raw.FailOn.Secrets != nil {
 		p.BlockSecrets = *raw.FailOn.Secrets
+	}
+	for _, f := range []struct {
+		name string
+		in   *int
+		out  *int
+	}{
+		{"critical", raw.SLADays.Critical, &p.SLADays.Critical},
+		{"high", raw.SLADays.High, &p.SLADays.High},
+		{"medium", raw.SLADays.Medium, &p.SLADays.Medium},
+		{"low", raw.SLADays.Low, &p.SLADays.Low},
+	} {
+		if f.in == nil {
+			continue
+		}
+		if *f.in < 0 {
+			return Policy{}, fmt.Errorf("policy sla_days.%s must be 0 or more, got %d", f.name, *f.in)
+		}
+		*f.out = *f.in
 	}
 	return p, nil
 }

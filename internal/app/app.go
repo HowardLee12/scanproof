@@ -34,9 +34,10 @@ const usage = `ScanProof scans a container image and records the result as evide
 Usage:
   scanproof scan [flags] IMAGE
   scanproof scan [flags] --trivy-results FILE
+  scanproof report --store URL --from YYYY-MM-DD --to YYYY-MM-DD [flags]
   scanproof version
 
-Run "scanproof scan --help" for the scan flags.
+Run "scanproof <command> --help" for the flags of a command.
 `
 
 // Run executes the command line and returns the process exit code.
@@ -48,6 +49,8 @@ func Run(ctx context.Context, args []string, env Env) int {
 	switch args[0] {
 	case "scan":
 		return runScan(ctx, args[1:], env)
+	case "report":
+		return runReport(ctx, args[1:], env)
 	case "version", "--version":
 		fmt.Fprintf(env.Stdout, "scanproof %s\n", Version)
 		return ExitOK

@@ -33,6 +33,14 @@ inputs:
     description: When to post to the webhooks in SCANPROOF_DISCORD_WEBHOOK_URL / SCANPROOF_SLACK_WEBHOOK_URL (violation, always, never).
     required: false
     default: violation
+  store:
+    description: Upload the evidence to s3://bucket/prefix (or file:///path). See docs/storage.md. Empty keeps it local only.
+    required: false
+    default: ""
+  sbom:
+    description: Write sbom.cdx.json so later rescans need no image pull.
+    required: false
+    default: "true"
 
 outputs:
   verdict:
@@ -45,6 +53,8 @@ outputs:
     description: Path to results.json.
   evidence-dir:
     description: Directory with all evidence files.
+  evidence-url:
+    description: Where the evidence was stored, when store is set.
 
 runs:
   using: docker
@@ -57,5 +67,7 @@ runs:
     - --out=${{ inputs.out }}
     - --pdf=${{ inputs.pdf }}
     - --notify=${{ inputs.notify }}
+    - --store=${{ inputs.store }}
+    - --sbom=${{ inputs.sbom }}
     - "--"
     - ${{ inputs.image }}

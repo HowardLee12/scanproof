@@ -76,8 +76,13 @@ type Manifest struct {
 	Files       []ManifestFile `json:"files"`
 }
 
-// BuildManifest hashes the named files in dir.
+// BuildManifest hashes the named files of a scan report in dir.
 func BuildManifest(dir string, doc Document, names []string) (Manifest, error) {
+	return BuildManifestFor(dir, doc.ReportID, doc.GeneratedAt, doc.Image.Digest, names)
+}
+
+// BuildManifestFor hashes the named files in dir for any report ID.
+func BuildManifestFor(dir, reportID string, generatedAt time.Time, imageDigest string, names []string) (Manifest, error) {
 	files := make([]ManifestFile, 0, len(names))
 	for _, name := range names {
 		sum, size, err := HashFile(filepath.Join(dir, name))
@@ -88,9 +93,9 @@ func BuildManifest(dir string, doc Document, names []string) (Manifest, error) {
 	}
 	return Manifest{
 		Schema:      "scanproof-manifest/v1",
-		ReportID:    doc.ReportID,
-		GeneratedAt: doc.GeneratedAt,
-		ImageDigest: doc.Image.Digest,
+		ReportID:    reportID,
+		GeneratedAt: generatedAt,
+		ImageDigest: imageDigest,
 		Files:       files,
 	}, nil
 }

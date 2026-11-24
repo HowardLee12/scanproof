@@ -16,6 +16,14 @@ import (
 // SchemaVersion identifies the layout of results.json.
 const SchemaVersion = "scanproof/v1"
 
+// Triggers record why a scan ran, so a period summary can tell build-time
+// checks from daily rescans.
+const (
+	TriggerCI     = "ci"
+	TriggerRescan = "rescan"
+	TriggerManual = "manual"
+)
+
 // Tool identifies the program that produced the report.
 type Tool struct {
 	Name    string `json:"name"`
@@ -62,6 +70,7 @@ type Document struct {
 	ReportID        string                        `json:"report_id"`
 	GeneratedAt     time.Time                     `json:"generated_at"`
 	Tool            Tool                          `json:"tool"`
+	Trigger         string                        `json:"trigger"`
 	Verdict         policy.Verdict                `json:"verdict"`
 	Image           model.Image                   `json:"image"`
 	Scanner         model.Scanner                 `json:"scanner"`
@@ -79,6 +88,7 @@ type Input struct {
 	ReportID     string
 	GeneratedAt  time.Time
 	Tool         Tool
+	Trigger      string
 	Result       model.ScanResult
 	Evaluation   policy.Evaluation
 	Policy       policy.Policy
@@ -95,6 +105,7 @@ func Build(in Input) Document {
 		ReportID:    in.ReportID,
 		GeneratedAt: in.GeneratedAt.UTC(),
 		Tool:        in.Tool,
+		Trigger:     in.Trigger,
 		Verdict:     ev.Verdict,
 		Image:       in.Result.Image,
 		Scanner:     in.Result.Scanner,

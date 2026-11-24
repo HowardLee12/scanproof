@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -49,14 +50,21 @@ func NewRunner(bin string, timeout time.Duration) Runner {
 	return Runner{Bin: bin, Timeout: timeout, exec: defaultExec}
 }
 
+// Scan is the outcome of one Trivy run.
+type Scan struct {
+	Result model.ScanResult
+	// Raw is Trivy's own JSON report, kept so it can be converted to an SBOM.
+	Raw []byte
+}
+
 // Scan scans one container image for vulnerabilities and secrets.
-func (r Runner) Scan(ctx context.Context, image string) (model.ScanResult, error) {
+func (r Runner) Scan(ctx context.Context, image string) (Scan, error) {
 	image = strings.TrimSpace(image)
 	if image == "" {
-		return model.ScanResult{}, errors.New("image reference is empty")
+		return Scan{}, errors.New("image reference is empty")
 	}
 	if strings.HasPrefix(image, "-") {
-		return model.ScanResult{}, fmt.Errorf("image reference %q must not start with '-'", image)
+		return Scan{}, fmt.Errorf("image reference %q must not start with '-'", image)
 	}
 
 	timeout := r.Timeout
@@ -68,6 +76,7 @@ func (r Runner) Scan(ctx context.Context, image string) (model.ScanResult, error
 	// finding is a ScanProof exception with a reason and an expiry date.
 	out, err := r.exec(ctx, r.Bin, "image", "--quiet", "--format", "json",
 		"--scanners", "vuln,secret",
+		"--list-all-pkgs",
 		"--config", os.DevNull,
 		"--ignorefile", "",
 		"--severity", "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL",
@@ -75,25 +84,58 @@ func (r Runner) Scan(ctx context.Context, image string) (model.ScanResult, error
 		"--timeout", timeout.String(),
 		image)
 	if err != nil {
-		return model.ScanResult{}, fmt.Errorf("trivy scan of %s failed: %w", image, err)
+		return Scan{}, fmt.Errorf("trivy scan of %s failed: %w", image, err)
 	}
 	res, err := Parse(bytes.NewReader(out))
 	if err != nil {
-		return model.ScanResult{}, err
+		return Scan{}, err
 	}
+	return Scan{Result: r.withDatabaseInfo(ctx, res), Raw: out}, nil
+}
 
-	// The database time makes the evidence reproducible, but a failure to read
-	// it must not throw away a completed scan.
-	if verOut, verErr := r.exec(ctx, r.Bin, "version", "--format", "json"); verErr == nil {
-		if info, parseErr := ParseVersion(bytes.NewReader(verOut)); parseErr == nil {
-			res.Scanner = model.Scanner{
-				Name:        res.Scanner.Name,
-				Version:     firstNonEmpty(res.Scanner.Version, info.Version),
-				DBUpdatedAt: info.DBUpdatedAt,
-			}
-		}
+// withDatabaseInfo adds the vulnerability database time. The time makes the
+// evidence reproducible, but failing to read it must not discard a scan.
+func (r Runner) withDatabaseInfo(ctx context.Context, res model.ScanResult) model.ScanResult {
+	verOut, err := r.exec(ctx, r.Bin, "version", "--format", "json")
+	if err != nil {
+		return res
 	}
-	return res, nil
+	info, err := ParseVersion(bytes.NewReader(verOut))
+	if err != nil {
+		return res
+	}
+	res.Scanner = model.Scanner{
+		Name:        res.Scanner.Name,
+		Version:     firstNonEmpty(res.Scanner.Version, info.Version),
+		DBUpdatedAt: info.DBUpdatedAt,
+		Imported:    res.Scanner.Imported,
+	}
+	return res
+}
+
+// SBOM converts a raw Trivy JSON report into a CycloneDX SBOM. Rescans can
+// then check the SBOM against a newer vulnerability database without pulling
+// the image again.
+func (r Runner) SBOM(ctx context.Context, raw []byte) ([]byte, error) {
+	dir, err := os.MkdirTemp("", "scanproof-sbom-")
+	if err != nil {
+		return nil, fmt.Errorf("create SBOM work directory: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	in := filepath.Join(dir, "trivy.json")
+	out := filepath.Join(dir, "sbom.cdx.json")
+	if err := os.WriteFile(in, raw, 0o600); err != nil {
+		return nil, fmt.Errorf("write trivy report: %w", err)
+	}
+	if _, err := r.exec(ctx, r.Bin, "convert", "--format", "cyclonedx", "--output", out, in); err != nil {
+		return nil, fmt.Errorf("convert trivy report to an SBOM: %w", err)
+	}
+	sbom, err := os.ReadFile(out)
+	if err != nil {
+		return nil, fmt.Errorf("read SBOM: %w", err)
+	}
+	return sbom, nil
 }
 
 func firstNonEmpty(values ...string) string {

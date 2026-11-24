@@ -111,3 +111,26 @@ func TestExamplePolicyIsValid(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDefaultSLA(t *testing.T) {
+	p := Default()
+	want := map[model.Severity]int{model.SeverityCritical: 15, model.SeverityHigh: 30, model.SeverityMedium: 90, model.SeverityLow: 0}
+	for sev, days := range want {
+		if got := p.SLA(sev); got != days {
+			t.Errorf("SLA(%v) = %d, want %d", sev, got, days)
+		}
+	}
+}
+
+func TestParseSLAOverrides(t *testing.T) {
+	p, err := Parse([]byte("sla_days:\n  critical: 7\n  low: 180\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.SLA(model.SeverityCritical) != 7 || p.SLA(model.SeverityLow) != 180 || p.SLA(model.SeverityHigh) != 30 {
+		t.Fatalf("unexpected SLA %+v", p)
+	}
+	if _, err := Parse([]byte("sla_days:\n  high: -1\n")); err == nil {
+		t.Fatal("negative SLA days must be rejected")
+	}
+}
