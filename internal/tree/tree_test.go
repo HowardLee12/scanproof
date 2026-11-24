@@ -100,7 +100,7 @@ func TestDigestIsDeterministic(t *testing.T) {
 	if da, db := digest(t, a), digest(t, b); da.Digest != db.Digest {
 		t.Fatalf("two identical trees have different digests: %s %s", da.Digest, db.Digest)
 	}
-	if d1, d2 := digest(t, a), digest(t, a); d1 != d2 {
+	if d1, d2 := digest(t, a), digest(t, a); d1.Digest != d2.Digest {
 		t.Fatal("the same tree gave two digests")
 	}
 }

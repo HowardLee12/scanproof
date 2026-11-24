@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -45,7 +46,21 @@ type Entry struct {
 	Size int64
 	// Target is the link target, exactly as stored (symlinks only).
 	Target string
-	info   fs.FileInfo
+	// Stamp identifies the entry and when it last changed. It is not part
+	// of the digest, so a copy has the same digest, but comparing stamps
+	// shows a change that was reverted between two reads.
+	Stamp Stamp
+	info  fs.FileInfo
+}
+
+// Stamp is an entry's device, inode, size and modification and change
+// times, where the platform has them.
+type Stamp struct {
+	Dev   uint64
+	Ino   uint64
+	Size  int64
+	Mtime int64 // nanoseconds
+	Ctime int64 // nanoseconds
 }
 
 // Result is the digest of a tree and what it contains.
@@ -55,6 +70,15 @@ type Result struct {
 	Dirs     int
 	Symlinks int
 	Bytes    int64
+	// Entries are every entry, sorted by path.
+	Entries []Entry
+}
+
+// ErrChanged marks a tree that changed while it was being read.
+var ErrChanged = errors.New("changed while it was being scanned")
+
+func changed(path string) error {
+	return fmt.Errorf("%s %w; scan the directory again when nothing is writing to it", path, ErrChanged)
 }
 
 func (r Result) add(e Entry) Result {
@@ -99,22 +123,25 @@ func ResolveRoot(path string) (string, error) {
 
 // Digest walks root without following symlinks and returns its tree digest.
 // content, when not nil, receives each file's bytes as they are hashed, so a
-// caller can process exactly the bytes the digest covers.
+// caller can process exactly the bytes the digest covers. Every read goes
+// through an os.Root, so nothing outside root is ever opened.
 func Digest(ctx context.Context, root string, content ContentFunc) (Result, error) {
-	entries, err := list(root)
+	r, err := openRoot(root)
+	if err != nil {
+		return Result{}, err
+	}
+	defer r.Close()
+	entries, err := list(ctx, r)
 	if err != nil {
 		return Result{}, err
 	}
 	h := sha256.New()
 	io.WriteString(h, Algorithm+"\x00")
-	res := Result{}
+	res := Result{Entries: entries}
 	for _, e := range entries {
-		if err := ctx.Err(); err != nil {
-			return Result{}, err
-		}
 		sum := ""
 		if e.Type == File {
-			if sum, err = hashFile(root, e, content); err != nil {
+			if sum, err = hashFile(ctx, r, e, content); err != nil {
 				return Result{}, err
 			}
 		}
@@ -123,6 +150,43 @@ func Digest(ctx context.Context, root string, content ContentFunc) (Result, erro
 	}
 	res.Digest = "sha256:" + hex.EncodeToString(h.Sum(nil))
 	return res, nil
+}
+
+// Unchanged reports whether two reads of a directory saw the same tree: the
+// same digest, and the same entries with the same stamps. It returns an
+// ErrChanged error naming the first difference.
+func Unchanged(before, after Result) error {
+	for i, a := range before.Entries {
+		if i >= len(after.Entries) || after.Entries[i].Path != a.Path {
+			return changed(a.Path)
+		}
+		b := after.Entries[i]
+		if b.Type != a.Type || b.Mode != a.Mode || b.Stamp != a.Stamp || b.Target != a.Target {
+			return changed(a.Path)
+		}
+	}
+	if len(after.Entries) > len(before.Entries) {
+		return changed(after.Entries[len(before.Entries)].Path)
+	}
+	if before.Digest != after.Digest {
+		return changed("the directory")
+	}
+	return nil
+}
+
+func openRoot(root string) (*os.Root, error) {
+	info, err := os.Lstat(root)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", root, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%s is not a directory", root)
+	}
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", root, err)
+	}
+	return r, nil
 }
 
 // record encodes one entry. Every field ends with a NUL byte, which cannot
