@@ -26,7 +26,8 @@ func Markdown(s Summary) string {
 		fmt.Fprintf(&b, "| %s | %d | %d | %d | %d | %s | %d | %d | %d |\n", r.Severity, r.SLADays, r.Opened, r.Fixed,
 			r.FixedInSLA, formatDays(r.MedianDaysToFix), r.ClosedOther, r.OpenInSLA, r.OpenOverdue)
 	}
-	b.WriteString("\n")
+	fmt.Fprintf(&b, "\nEvery tracked finding (%d) is listed in findings.csv, with its dates, its status and the "+
+		"scan reports that show when it was first seen and when it went away.\n\n", s.FindingsCount)
 
 	writeFindings(&b, "Fixed after the SLA", s.FixedLate)
 	writeFindings(&b, "Open past the SLA at the end of the period", s.Overdue)
@@ -34,8 +35,8 @@ func Markdown(s Summary) string {
 	if len(s.Exceptions.Applied)+len(s.Exceptions.Expired) > 0 {
 		fmt.Fprintf(&b, "Exceptions applied: %s. Expired: %s.\n\n", listOrNone(s.Exceptions.Applied), listOrNone(s.Exceptions.Expired))
 	}
-	fmt.Fprintf(&b, "<sub>Summary %s · %d scans listed in population.csv · source %s</sub>\n",
-		s.SummaryID, s.PopulationCount, s.Store)
+	fmt.Fprintf(&b, "<sub>Summary %s · %d scans listed in population.csv · %d findings in findings.csv · source %s</sub>\n",
+		s.SummaryID, s.PopulationCount, s.FindingsCount, s.Store)
 	return b.String()
 }
 

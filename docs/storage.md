@@ -32,7 +32,7 @@ With `--save`, period summaries are saved next to the scans:
 
 ```
 <prefix>/summaries/2026-07-01_2026-09-30/PS-20261001-ABC123/
-    summary.json  population.csv  summary.md  summary.pdf  manifest.json
+    summary.json  population.csv  findings.csv  summary.md  summary.pdf  manifest.json
 ```
 
 If an upload fails, the run exits with 2 and the files stay in `--out` (`results.json`, `summary.md`, `manifest.json`, and the PDF and SBOM if they were made), so you can see what was not stored; nothing is written to the GitHub job summary. If the scan folder was stored but its digest index entry could not be written, the error says "report SR-… is stored but not indexed, so rescans will not find it" and names the folder; scan again to get a stored and indexed scan.
@@ -263,3 +263,38 @@ scanproof report \
 - Open findings are judged when the summary runs. If you make a summary before the period ends, a finding counts as overdue only if its deadline has already passed.
 
 The summary needs one `List` request per day of the period plus the look-back window. It then needs one `Get` request per scan.
+
+### Outputs
+
+| File | What it holds |
+|---|---|
+| `summary.pdf` | The report for auditors: coverage, remediation against the SLA, findings fixed after their SLA or open past it, exceptions, and the SHA-256 of the CSV and JSON files |
+| `summary.json` | The same numbers in machine-readable form, with `population_count` and `findings_count` |
+| `population.csv` | One row per scan in the period, with the folder that holds its evidence |
+| `findings.csv` | One row per tracked finding, with the scans that show when it was first seen and when it went away |
+| `summary.md` | A short version for the CI job summary |
+| `manifest.json` | SHA-256 of every file above |
+
+Cells in both CSV files that start with `=`, `+`, `-`, `@`, a tab or a carriage return get a leading `'`, so spreadsheet programs show them as text instead of running them as formulas. A scoped npm package such as `@babel/core` therefore appears as `'@babel/core`.
+
+### findings.csv
+
+Auditors often sample individual findings, for example "pick five fixed vulnerabilities and show the evidence". `findings.csv` lists every tracked finding (a fix is available, no exception accepts it, and its severity has an SLA) that was first seen in the period, closed in the period, or still open when the summary judged open findings. Its rows add up to the remediation table. They are ordered by first-seen time, then image, ID and package.
+
+| Column | Meaning |
+|---|---|
+| `image` | The image name without tag or digest (`registry/repo`), or `dir:NAME` for a directory. Findings are tracked by this name, so a fix shipped as a new digest closes the finding |
+| `artifact_type` | `container_image` or `directory` |
+| `id`, `package`, `severity` | The vulnerability |
+| `first_seen_utc` | When a scan first reported it, in RFC 3339 UTC. A finding that comes back keeps this date |
+| `due_utc` | `first_seen_utc` plus the SLA |
+| `status` | `open_in_sla`, `open_overdue`, `fixed_in_sla`, `fixed_late`, `accepted` (closed by an exception) or `no_longer_fixable` (the fix disappeared from the vulnerability data). Only the two `fixed_` statuses count as fixed |
+| `closed_at_utc` | When it was closed: the first scan of the first day on which no scan of that image name reported it. Empty while open |
+| `days_open` | Days from first seen to closing, or to the time open findings were judged, with one decimal |
+| `sla_days` | The SLA for its severity |
+| `reopened` | How many times it came back after being closed |
+| `first_seen_report` | The report ID (`SR-…`) of the scan that first reported it |
+| `last_seen_report` | The latest scan that still reported it. `last_seen` in `summary.json` is the first scan of that day, so on a day with several scans the two can differ |
+| `closed_by_reports` | Every scan of that image name on the closing day, separated by `;`. None of them reported it (or they reported it as accepted or without a fix). For a finding that came back, these are from its latest closing |
+
+To check a row, open the scans it names. A report ID contains the UTC day the scan ran, so `SR-20260704-7F3A9C` is stored under `scans/2026/07/04/SR-20260704-7F3A9C/`. Scans in the period are also listed in `population.csv`; a `first_seen_report` from the look-back window is only in the store.

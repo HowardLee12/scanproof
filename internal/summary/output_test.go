@@ -30,6 +30,7 @@ func TestMarkdown(t *testing.T) {
 		"CVE-B",
 		"CVE-C",
 		"population.csv",
+		"Every tracked finding (4) is listed in findings.csv",
 		"PS-20261001-ABC123",
 	} {
 		if !strings.Contains(md, want) {
@@ -39,7 +40,7 @@ func TestMarkdown(t *testing.T) {
 }
 
 func TestPDFView(t *testing.T) {
-	v := newPDFView(sampleSummary(), map[string]string{"population.csv": "abc", "summary.json": "def"})
+	v := newPDFView(sampleSummary(), map[string]string{"population.csv": "abc", "findings.csv": "fed", "summary.json": "def"})
 	if v.SummaryID != "PS-20261001-ABC123" || v.PeriodLabel != "2026-07-01 to 2026-09-30 · 92 days" {
 		t.Errorf("header = %+v", v)
 	}
@@ -52,7 +53,10 @@ func TestPDFView(t *testing.T) {
 	if len(v.FixedLate) != 1 || len(v.Overdue) != 1 || len(v.Population) != 7 {
 		t.Errorf("late %d overdue %d population %d", len(v.FixedLate), len(v.Overdue), len(v.Population))
 	}
-	if !hasLabel(v.Evidence, "population.csv SHA-256") {
+	if v.FindingsCount != 4 {
+		t.Errorf("findings count = %d", v.FindingsCount)
+	}
+	if !hasLabel(v.Evidence, "population.csv SHA-256") || !hasLabel(v.Evidence, "findings.csv SHA-256") {
 		t.Errorf("evidence rows = %+v", v.Evidence)
 	}
 }

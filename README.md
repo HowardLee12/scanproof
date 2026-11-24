@@ -11,7 +11,7 @@ It runs [Trivy](https://github.com/aquasecurity/trivy) for vulnerabilities and e
 | `report.pdf` | A short report for auditors: verdict, image digest (or directory and tree digest), change, findings, exceptions |
 | `manifest.json` | SHA-256 of each file, so anyone can check later that nothing was changed |
 
-It can also post the result to Discord or Slack, keep every scan in an S3 bucket, and turn a quarter of stored scans into a **period summary** for auditors: coverage, remediation against your SLA, and the full list of scans to sample from.
+It can also post the result to Discord or Slack, keep every scan in an S3 bucket, and turn a quarter of stored scans into a **period summary** for auditors: coverage, remediation against your SLA, and full lists of scans and findings to sample from.
 
 ScanProof does not replace your scanner or your registry's scanning. It answers a different question: for every image you deployed, was it checked before release, what was known at the time, and can you prove it?
 
@@ -64,7 +64,7 @@ At the end of a period, build the summary an auditor asks for:
 scanproof report --store s3://acme-scan-evidence/prod --from 2026-07-01 --to 2026-09-30 --save
 ```
 
-It writes `summary.pdf`, `summary.json`, `summary.md` and `population.csv` (one row per scan, for sampling). Each finding is followed from the first scan that reports it until scans of that image no longer do, and is measured against the `sla_days` in your policy. Scans of the same image on the same day are combined, so an image running in two places only counts as fixed when every copy is. A finding that comes back keeps its original deadline. Findings closed by an exception are reported separately and never count as fixed.
+It writes `summary.pdf`, `summary.json`, `summary.md`, `population.csv` (one row per scan, for sampling) and `findings.csv` (one row per tracked finding, with its dates, status and the IDs of the scans that first reported it and that showed it gone). Each finding is followed from the first scan that reports it until scans of that image no longer do, and is measured against the `sla_days` in your policy. Scans of the same image on the same day are combined, so an image running in two places only counts as fixed when every copy is. A finding that comes back keeps its original deadline. Findings closed by an exception are reported separately and never count as fixed. [docs/storage.md](docs/storage.md#period-summary) describes every output.
 
 To check what is **running now** against today's vulnerability data, run a daily rescan. It finds running images in Kubernetes, Amazon ECS or a list, checks each one's stored SBOM (no image pull), stores the results with the build-time scans, and posts one summary to chat:
 

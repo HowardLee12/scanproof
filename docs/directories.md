@@ -58,7 +58,7 @@ A directory scan writes the same files as an image scan: `results.json`, `summar
 - `image.reference` is `dir:NAME[:VERSION]` and `image.digest` is the tree digest, so tools that only read `image` still group and index directories correctly.
 - `manifest.json` records the artifact type and the tree digest, so a rescan can never use an image's SBOM for a directory or the other way round.
 - The PDF is a "Directory Scan Report" with the name, version, tree digest, scanned path and contents. The job summary and the chat message also say "directory".
-- In the period summary, `population.csv` has an `artifact_type` column (the last one) and lists directories as `dir:NAME[:VERSION]`. Findings are tracked per `dir:NAME` across versions, never together with an image of the same name.
+- In the period summary, `population.csv` has an `artifact_type` column (the last one) and lists directories as `dir:NAME[:VERSION]`. Findings are tracked per `dir:NAME` across versions, never together with an image of the same name; `findings.csv` lists them under `dir:NAME` with artifact type `directory`.
 
 ## The tree digest
 

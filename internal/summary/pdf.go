@@ -39,6 +39,7 @@ type pdfView struct {
 	PeriodLabel       string     `json:"period_label"`
 	Tiles             []tile     `json:"tiles"`
 	Remediation       [][]string `json:"remediation"`
+	FindingsCount     int        `json:"findings_count"`
 	FixedLate         [][]string `json:"fixed_late"`
 	Overdue           [][]string `json:"overdue"`
 	ExceptionsApplied string     `json:"exceptions_applied"`
@@ -78,6 +79,7 @@ func newPDFView(s Summary, hashes map[string]string) pdfView {
 			{"Open past SLA", strconv.Itoa(len(s.Overdue)), "at the end of the period", overdueAccent},
 		},
 		Remediation:       remediationRows(s.Remediation),
+		FindingsCount:     s.FindingsCount,
 		FixedLate:         findingRows(s.FixedLate, s.asOf, true),
 		Overdue:           findingRows(s.Overdue, s.asOf, false),
 		ExceptionsApplied: listOrNone(s.Exceptions.Applied),
@@ -131,7 +133,7 @@ func populationView(all []PopulationRow) ([][]string, int) {
 
 func evidenceRows(s Summary, hashes map[string]string) []row {
 	rows := []row{{Label: "Summary ID", Value: s.SummaryID}, {Label: "Source", Value: s.Store}}
-	for _, name := range []string{"population.csv", "summary.json"} {
+	for _, name := range []string{"population.csv", "findings.csv", "summary.json"} {
 		if h := hashes[name]; h != "" {
 			rows = append(rows, row{Label: name + " SHA-256", Value: h, Mono: true})
 		}
