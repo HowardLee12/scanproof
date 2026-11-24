@@ -177,3 +177,10 @@ func TestFileReportsMalformedImageLines(t *testing.T) {
 		}
 	}
 }
+
+func TestFileSaysWhyAnImageReferenceIsWrong(t *testing.T) {
+	_, err := listFile(t, "ghcr.io/Owner/app:1\napp:\n")
+	if err == nil || !strings.Contains(err.Error(), "repository can only contain") || !strings.Contains(err.Error(), "tag name after the colon") {
+		t.Fatalf("got %v", err)
+	}
+}

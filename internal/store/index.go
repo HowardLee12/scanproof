@@ -59,6 +59,9 @@ func SBOMEntries(ctx context.Context, st Store, digest string) ([]IndexEntry, in
 	out := make([]IndexEntry, 0, len(keys))
 	unusable := 0
 	for i := len(keys) - 1; i >= 0; i-- {
+		if strings.HasSuffix(keys[i], "/") {
+			continue // an S3 "folder" marker, not an entry
+		}
 		data, err := st.Get(ctx, keys[i])
 		if err != nil {
 			return nil, 0, err

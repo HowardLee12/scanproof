@@ -28,8 +28,9 @@ var treeDigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 //
 // Text after the first run of whitespace is a free-text location. Blank
 // lines and lines starting with # are ignored. A line that starts with dir:
-// is always a directory. A malformed directory line is reported as a
-// failure that names the line; the other lines are still read.
+// is always a directory. Every malformed line, image or directory, is
+// reported as a failure that names the line; the other lines are still
+// read.
 type File struct {
 	Path string
 }
@@ -93,9 +94,24 @@ func parseImage(spec, location string) (RunningImage, error) {
 		return RunningImage{}, fmt.Errorf("%q is not a full image digest (sha256: and 64 lowercase hex characters)", digest)
 	}
 	if _, err := name.ParseReference(spec); err != nil {
-		return RunningImage{}, fmt.Errorf("%q is not an image reference", spec)
+		return RunningImage{}, fmt.Errorf("%q is not an image reference: %v", spec, referenceProblem(spec, pinned))
 	}
 	return RunningImage{Reference: ref, Digest: digest, Locations: []string{location}}, nil
+}
+
+// referenceProblem says why a reference does not parse. ParseReference only
+// says that it does not; NewDigest and NewTag say why.
+func referenceProblem(spec string, pinned bool) error {
+	var err error
+	if pinned {
+		_, err = name.NewDigest(spec)
+	} else {
+		_, err = name.NewTag(spec)
+	}
+	if err == nil {
+		return errors.New("it does not parse")
+	}
+	return err
 }
 
 // parseDirectory reads dir:NAME[:VERSION]@sha256:<tree digest>.

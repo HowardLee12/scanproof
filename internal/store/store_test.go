@@ -178,3 +178,25 @@ func TestIndexErrors(t *testing.T) {
 		t.Errorf("a corrupt index entry is skipped and counted: %v %d %v", got, unusable, err)
 	}
 }
+
+// folderStore lists an S3 "folder marker" key along with a real entry.
+type folderStore struct{ *FileStore }
+
+func (f folderStore) List(ctx context.Context, prefix string) ([]string, error) {
+	keys, err := f.FileStore.List(ctx, prefix)
+	return append([]string{prefix}, keys...), err
+}
+
+func TestSBOMEntriesIgnoresFolderMarkers(t *testing.T) {
+	ctx := context.Background()
+	s := folderStore{&FileStore{root: t.TempDir()}}
+	digest := "sha256:" + strings.Repeat("c", 64)
+	e := IndexEntry{ReportID: "SR-20261124-BBBBBB", ScanPrefix: "scans/2026/11/24/SR-20261124-BBBBBB/", HasSBOM: true}
+	if err := PutIndexEntry(ctx, s, digest, e); err != nil {
+		t.Fatal(err)
+	}
+	got, unusable, err := SBOMEntries(ctx, s, digest)
+	if err != nil || len(got) != 1 || unusable != 0 {
+		t.Fatalf("a folder marker is not an index entry: %v %d %v", got, unusable, err)
+	}
+}
