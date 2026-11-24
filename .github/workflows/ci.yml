@@ -60,15 +60,15 @@ jobs:
         run: docker build --build-arg VERSION=ci-${{ github.sha }} -t scanproof:ci .
       - name: Scan a known-vulnerable image end to end
         run: |
-          mkdir -p out store
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/out:/out" -v "$PWD/store:/store" \
+          mkdir -p out store trivy-cache
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/out:/out" -v "$PWD/store:/store" -v "$PWD/trivy-cache:/root/.cache/trivy" \
             scanproof:ci scan --out /out --store file:///store alpine:3.18.0
           test -s out/report.pdf && test -s out/results.json && test -s out/sbom.cdx.json && test -s out/manifest.json
       - name: Rescan the running image from its stored SBOM
         run: |
           digest=$(jq -r .image.digest out/results.json)
           echo "alpine:3.18.0@${digest}" > out/images.txt
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/out:/out" -v "$PWD/store:/store" \
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/out:/out" -v "$PWD/store:/store" -v "$PWD/trivy-cache:/root/.cache/trivy" \
             scanproof:ci rescan --store file:///store --inventory file --images-file /out/images.txt --out /out/rescan
           grep -l '"method": "sbom"' out/rescan/*/results.json
       - name: Scan a directory and rescan it from its stored SBOM
@@ -76,12 +76,12 @@ jobs:
           meta=dir/venv/lib/python3.12/site-packages/urllib3-1.26.4.dist-info
           mkdir -p "$meta"
           printf 'Metadata-Version: 2.1\nName: urllib3\nVersion: 1.26.4\n' > "$meta/METADATA"
-          docker run --rm -v "$PWD/dir:/scan/dir:ro" -v "$PWD/out:/out" -v "$PWD/store:/store" \
+          docker run --rm -v "$PWD/dir:/scan/dir:ro" -v "$PWD/out:/out" -v "$PWD/store:/store" -v "$PWD/trivy-cache:/root/.cache/trivy" \
             scanproof:ci scan --dir --name example-venv --version 1 --out /out/dir --store file:///store /scan/dir
           jq -e '.artifact_type == "directory" and any(.vulnerabilities[]; .package == "urllib3")' out/dir/results.json
           test -s out/dir/report.pdf && test -s out/dir/sbom.cdx.json
           echo "dir:example-venv:1@$(jq -r .directory.tree_digest out/dir/results.json) ci-runner" > out/dirs.txt
-          docker run --rm -v "$PWD/out:/out" -v "$PWD/store:/store" \
+          docker run --rm -v "$PWD/out:/out" -v "$PWD/store:/store" -v "$PWD/trivy-cache:/root/.cache/trivy" \
             scanproof:ci rescan --store file:///store --inventory file --images-file /out/dirs.txt --out /out/dir-rescan
           jq -e '.artifact_type == "directory" and .runtime.method == "sbom" and any(.vulnerabilities[]; .package == "urllib3")' \
             out/dir-rescan/*/results.json
@@ -90,11 +90,23 @@ jobs:
         # the real Trivy: each file below holds a GitHub token. Files Trivy
         # reads must be reported; the others must be listed in
         # directory.coverage. The token is assembled here, so no
-        # token-shaped string is committed.
+        # token-shaped string is committed. Trivy accepts unknown allow-rule
+        # IDs silently, so each ID ScanProof switches off has a file that
+        # only that rule would hide:
+        #   tests       pkg/tests/conftest.py     examples    examples/demo.py
+        #   markdown    README.md                 locale-dir  pkg/locale/de/messages.po
+        #   vendor      pkg/vendor/lib.py         usr-dirs    usr/share/doc/notes.txt,
+        #                                                     usr/include/a.h, usr/lib/x/a.txt
+        #   python      usr/local/lib/python3.12/site.py
+        #   golang      usr/local/go/src/a.go     node.js     opt/yarn-v1.22.19/lib/cli.js
+        #   rubygems    usr/lib/gems/2.7/a.rb     wordpress   usr/src/wordpress/wp-config.php
+        # (usr/lib/gems is also under usr-dirs; with both rules off it is read.)
         run: |
           tok="ghp_$(printf 'S%.0s' $(seq 36))"
-          read_paths="app/settings.py pkg/tests/conftest.py examples/demo.py README.md pkg/locale/de/messages.po
-            pkg/vendor/lib.py vendor/top.py usr/share/doc/notes.txt usr/local/lib/python3.12/site.py trivy-secret.yaml"
+          read_paths="app/settings.py vendor/top.py trivy-secret.yaml
+            pkg/tests/conftest.py examples/demo.py README.md pkg/locale/de/messages.po pkg/vendor/lib.py
+            usr/share/doc/notes.txt usr/include/a.h usr/lib/x/a.txt usr/local/lib/python3.12/site.py
+            usr/local/go/src/a.go opt/yarn-v1.22.19/lib/cli.js usr/lib/gems/2.7/a.rb usr/src/wordpress/wp-config.php"
           unread_paths="src/plugin/.git/config dev/creds.txt web/node_modules/left-pad/index.js package-lock.json
             go.sum model.bin archive.zip native.so"
           for p in $read_paths $unread_paths; do
@@ -102,8 +114,11 @@ jobs:
             printf 'token = "%s"\n' "$tok" > "planted/$p"
           done
           printf '\177ELF\002\001\001\000 token = "%s"\n' "$tok" > planted/native.so
+          # tiny only tests that files under 10 bytes are left out of the
+          # model: no secret rule fits in them, so they are neither reported
+          # nor listed.
           printf 'ghp_x' > planted/tiny
-          docker run --rm -v "$PWD/planted:/scan/planted:ro" -v "$PWD/out:/out" \
+          docker run --rm -v "$PWD/planted:/scan/planted:ro" -v "$PWD/out:/out" -v "$PWD/trivy-cache:/root/.cache/trivy" \
             scanproof:ci scan --dir --name planted --out /out/planted --pdf=false --sbom=false /scan/planted
           r=out/planted/results.json
           for p in $read_paths; do
@@ -135,7 +150,7 @@ jobs:
           # never downloads from the ClamAV mirrors.
           hex=$(printf 'EICAR-STANDARD-ANTIVIRUS-TEST-FILE' | od -An -tx1 | tr -d ' \n')
           echo "ScanProof.Test.EICAR:0:*:${hex}" > mal/test.ndb
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/mal:/mal" \
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/mal:/mal" -v "$PWD/trivy-cache:/root/.cache/trivy" \
             scanproof:ci-full scan --malware --clamav-db /mal/test.ndb --out /mal/out -- scanproof-test/eicar:ci
           jq -e '.malware.findings | length == 1 and .[0].path == "/app/tests/eicar.com"' mal/out/results.json
           test -s mal/out/report.pdf
