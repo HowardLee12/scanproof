@@ -55,6 +55,8 @@
 )
 #note[A finding is tracked when a fix is available and no exception accepts it. Scans of the same image name on the same day are combined, so a finding stays open while any running copy still has it. It counts as fixed when a later day's scans no longer report it; if it comes back, it reopens with its original deadline. Findings closed because an exception accepted them, or because the fix disappeared from the vulnerability data, are not counted as fixed. Open findings are judged as of #d.as_of.]
 
+#note[Every tracked finding (#d.findings_count) is listed in findings.csv: its dates, status and days open, and the IDs of the scan reports that first showed it, last showed it and showed it gone. Auditors can sample fixed findings from it directly.]
+
 #section("Fixed after SLA", note: str(d.fixed_late.len()) + " findings")
 #if d.fixed_late.len() == 0 {
   note[Every finding fixed in the period was fixed within its SLA.]

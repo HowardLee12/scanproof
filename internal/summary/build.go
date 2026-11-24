@@ -109,6 +109,8 @@ type Summary struct {
 	Incomplete      []string              `json:"incomplete_uploads"`
 	PopulationCount int                   `json:"population_count"`
 	Population      []PopulationRow       `json:"-"`
+	FindingsCount   int                   `json:"findings_count"`
+	Findings        []FindingRow          `json:"-"`
 	asOf            time.Time
 }
 
@@ -124,6 +126,7 @@ func Build(in Input) Summary {
 	tracked := track(in.Scans, in.Policy)
 	remediation, late, overdue := remediate(tracked, in.Policy, in.Period, asOf)
 	population := populationRows(inPeriod)
+	findings := listFindings(tracked, in.Policy, in.Period, asOf)
 
 	return Summary{
 		Schema:      SchemaVersion,
@@ -143,6 +146,8 @@ func Build(in Input) Summary {
 		Incomplete:      orEmpty(in.Incomplete),
 		PopulationCount: len(population),
 		Population:      population,
+		FindingsCount:   len(findings),
+		Findings:        findings,
 		asOf:            asOf,
 	}
 }
