@@ -57,15 +57,6 @@ func TestRescanGoesOnAfterABadLineAndAFailedSource(t *testing.T) {
 	}
 }
 
-func TestRescanWarnsAboutAnImagesFileItDoesNotRead(t *testing.T) {
-	t.Setenv("KUBERNETES_SERVICE_HOST", "")
-	h := newHarness()
-	h.run("rescan", "--store", "file://"+t.TempDir(), "--inventory", "kubernetes", "--images-file", "images.txt", "--out", t.TempDir())
-	if !strings.Contains(h.stderr.String(), "warning: --images-file is only read with --inventory file") {
-		t.Fatalf("stderr = %q", h.stderr.String())
-	}
-}
-
 func TestRescanNamesTheStoredScanItCouldNotUse(t *testing.T) {
 	storeDir, trivyBin := t.TempDir(), fakeTrivy(t)
 	digest := seedDirectoryScan(t, storeDir, trivyBin, makeSoftwareDir(t))

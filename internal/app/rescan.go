@@ -72,9 +72,6 @@ func parseRescanOptions(args []string, stderr io.Writer) (rescanOptions, error) 
 	if err := validateRescanOptions(opts); err != nil {
 		return rescanOptions{}, err
 	}
-	if !slices.Contains(opts.Inventories, "file") && opts.ImagesFile != "" {
-		fmt.Fprintln(stderr, "scanproof: warning: --images-file is only read with --inventory file (for example --inventory kubernetes,file); ignoring it")
-	}
 	if opts.Notify, err = notify.ParseWhen(when); err != nil {
 		return rescanOptions{}, err
 	}
@@ -118,6 +115,10 @@ func validateRescanOptions(opts rescanOptions) error {
 func inventorySources(ctx context.Context, opts rescanOptions) (inventory.Combined, []inventory.Failure) {
 	sources := inventory.Combined{}
 	failures := []inventory.Failure{}
+	if opts.ImagesFile != "" && !slices.Contains(opts.Inventories, "file") {
+		failures = append(failures, inventory.Failure{Where: "--images-file",
+			Err: errors.New("it is only read with --inventory file (for example --inventory kubernetes,file)")})
+	}
 	for _, name := range opts.Inventories {
 		var s inventory.Source
 		var err error

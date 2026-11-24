@@ -43,33 +43,34 @@ func PutIndexEntry(ctx context.Context, st Store, digest string, e IndexEntry) e
 var reportIDPattern = regexp.MustCompile(`^SR-(\d{8})-[0-9A-F]{6}$`)
 
 // SBOMEntries returns the indexed scans of digest that saved an SBOM, newest
-// first. Entries whose report ID or folder does not have the expected form
-// are skipped, so a stray object in the index cannot redirect a rescan.
-// Callers must still check the SBOM against the scan's manifest.
-func SBOMEntries(ctx context.Context, st Store, digest string) ([]IndexEntry, error) {
+// first, and the number of index entries that could not be used: entries
+// that cannot be decoded, or whose report ID, folder or SBOM flag does not
+// have the expected form, so a stray object in the index cannot redirect a
+// rescan. Callers must still check the SBOM against the scan's manifest.
+func SBOMEntries(ctx context.Context, st Store, digest string) ([]IndexEntry, int, error) {
 	prefix, err := DigestIndexPrefix(digest)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	keys, err := st.List(ctx, prefix)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]IndexEntry, 0, len(keys))
+	unusable := 0
 	for i := len(keys) - 1; i >= 0; i-- {
 		data, err := st.Get(ctx, keys[i])
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		var e IndexEntry
-		if err := json.Unmarshal(data, &e); err != nil {
+		if json.Unmarshal(data, &e) != nil || !e.HasSBOM || !validEntry(e) || keys[i] != prefix+e.ReportID+".json" {
+			unusable++
 			continue
 		}
-		if e.HasSBOM && validEntry(e) && keys[i] == prefix+e.ReportID+".json" {
-			out = append(out, e)
-		}
+		out = append(out, e)
 	}
-	return out, nil
+	return out, unusable, nil
 }
 
 func validEntry(e IndexEntry) bool {

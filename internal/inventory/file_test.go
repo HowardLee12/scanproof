@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -148,5 +149,31 @@ func TestCombinedGoesOnAfterAFailedSource(t *testing.T) {
 	}
 	if failures[0].Where != "kubernetes inventory" || !errors.Is(failures[0].Err, boom) || failures[1].Where != "images file x line 3" {
 		t.Errorf("failures = %+v", failures)
+	}
+}
+
+func TestFileReportsMalformedImageLines(t *testing.T) {
+	zeros := strings.Repeat("0", 64)
+	got, err := listFile(t, strings.Join([]string{
+		"cr.example.com/vllm:0.9@sha256:" + zeros + "   gpu/vllm",
+		"localhost:5000/team/app:1",
+		"cr.example.com/app:1.2@sha256:abc123   prod/app",
+		"@@@ junk",
+		"-rf  /",
+		"DIR:acme@sha256:" + zeros,
+		"repo/app@md5:" + zeros[:32],
+		"repo/app:1@sha256:" + zeros + "@sha256:" + zeros,
+	}, "\n"))
+	if len(got) != 2 || got[0].Reference != "cr.example.com/vllm:0.9" || got[1].Reference != "localhost:5000/team/app:1" {
+		t.Fatalf("good lines = %+v", got)
+	}
+	var partial *PartialError
+	if !errors.As(err, &partial) || len(partial.Failures) != 6 {
+		t.Fatalf("want one failure for each of the 6 malformed lines, got %v", err)
+	}
+	for i, f := range partial.Failures {
+		if want := "line " + strconv.Itoa(i+3); !strings.Contains(f.Where, want) {
+			t.Errorf("failure %d is %q, want %s", i, f.Where, want)
+		}
 	}
 }

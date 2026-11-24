@@ -10,10 +10,13 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/google/go-containerregistry/pkg/name"
+
 	"github.com/HowardLee12/scanproof/internal/model"
 )
 
-// treeDigestPattern is the form of a directory's tree digest.
+// treeDigestPattern is the form of a directory's tree digest, and of an
+// image digest in the images file.
 var treeDigestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 
 // File reads running images and deployed directories from a text file, one
@@ -76,8 +79,23 @@ func parseLine(line, defaultLocation string) (RunningImage, error) {
 	if strings.HasPrefix(spec, "dir:") {
 		return parseDirectory(spec, location)
 	}
-	ref, _, _ := strings.Cut(spec, "@")
-	return RunningImage{Reference: ref, Digest: model.DigestOf(spec), Locations: []string{location}}, nil
+	return parseImage(spec, location)
+}
+
+// parseImage reads an image reference, optionally pinned with
+// @sha256:<digest>. The reference must parse, and a digest must be complete.
+func parseImage(spec, location string) (RunningImage, error) {
+	ref, digest, pinned := strings.Cut(spec, "@")
+	if strings.HasPrefix(spec, "-") {
+		return RunningImage{}, fmt.Errorf("%q is not an image reference", spec)
+	}
+	if pinned && !treeDigestPattern.MatchString(digest) {
+		return RunningImage{}, fmt.Errorf("%q is not a full image digest (sha256: and 64 lowercase hex characters)", digest)
+	}
+	if _, err := name.ParseReference(spec); err != nil {
+		return RunningImage{}, fmt.Errorf("%q is not an image reference", spec)
+	}
+	return RunningImage{Reference: ref, Digest: digest, Locations: []string{location}}, nil
 }
 
 // parseDirectory reads dir:NAME[:VERSION]@sha256:<tree digest>.

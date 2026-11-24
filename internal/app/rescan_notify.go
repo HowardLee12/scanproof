@@ -72,11 +72,12 @@ func rescanAttention(outcomes []rescanOutcome) (policy.Verdict, []string) {
 	lines := []string{}
 	for _, o := range outcomes {
 		var stored *storedScanError
+		var index *indexError
 		switch {
 		case errors.Is(o.err, errNoDirectoryScan):
 			verdict = policy.VerdictWarn
 			lines = append(lines, o.label()+": no stored scan; run scanproof scan --dir on a host that has it")
-		case errors.As(o.err, &stored), o.err != nil && o.where != "":
+		case errors.As(o.err, &stored), errors.As(o.err, &index), o.err != nil && o.where != "":
 			verdict = policy.VerdictWarn
 			lines = append(lines, o.label()+": "+shorten(o.err.Error(), maxReasonChars))
 		case o.err != nil:
