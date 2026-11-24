@@ -119,3 +119,59 @@ func TestScanKey(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestDigestIndexPrefix(t *testing.T) {
+	got, err := DigestIndexPrefix("sha256:02bb6f428431fbc2809c5d1b41eab5a68350194fb508869a33cb1af4444c9b11")
+	if err != nil || got != "index/digests/sha256/02bb6f428431fbc2809c5d1b41eab5a68350194fb508869a33cb1af4444c9b11/" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	for _, bad := range []string{"", "latest", "sha256:../../x", "sha256:XYZ", "md5:abc"} {
+		if _, err := DigestIndexPrefix(bad); err == nil {
+			t.Errorf("%q: expected an error", bad)
+		}
+	}
+}
+
+func TestSBOMEntriesNewestFirstAndValidated(t *testing.T) {
+	ctx := context.Background()
+	s := &FileStore{root: t.TempDir()}
+	digest := "sha256:02bb6f428431fbc2809c5d1b41eab5a68350194fb508869a33cb1af4444c9b11"
+	older := IndexEntry{ReportID: "SR-20261101-AAAAAA", ScanPrefix: "scans/2026/11/01/SR-20261101-AAAAAA/", HasSBOM: true}
+	newer := IndexEntry{ReportID: "SR-20261124-BBBBBB", ScanPrefix: "scans/2026/11/24/SR-20261124-BBBBBB/", HasSBOM: true}
+	forged := IndexEntry{ReportID: "SR-99999999-FFFFFF", ScanPrefix: "scans/evil/", HasSBOM: true}
+	noSBOM := IndexEntry{ReportID: "SR-20261125-CCCCCC", ScanPrefix: "scans/2026/11/25/SR-20261125-CCCCCC/"}
+	for _, e := range []IndexEntry{older, newer, forged, noSBOM} {
+		if err := PutIndexEntry(ctx, s, digest, e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := SBOMEntries(ctx, s, digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ReportID != newer.ReportID || got[1].ReportID != older.ReportID {
+		t.Fatalf("got %+v", got)
+	}
+	if got, err := SBOMEntries(ctx, s, "sha256:"+strings.Repeat("a", 64)); err != nil || len(got) != 0 {
+		t.Fatalf("an unknown digest has no entries: %v %v", got, err)
+	}
+}
+
+func TestIndexErrors(t *testing.T) {
+	ctx := context.Background()
+	s := &FileStore{root: t.TempDir()}
+	if err := PutIndexEntry(ctx, s, "not-a-digest", IndexEntry{ReportID: "SR-1"}); err == nil {
+		t.Error("an invalid digest must be rejected")
+	}
+	if _, err := SBOMEntries(ctx, s, "latest"); err == nil {
+		t.Error("an invalid digest must be rejected")
+	}
+	digest := "sha256:" + strings.Repeat("b", 64)
+	prefix, _ := DigestIndexPrefix(digest)
+	if err := s.Put(ctx, prefix+"SR-9.json", []byte("{broken"), "application/json"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := SBOMEntries(ctx, s, digest); err != nil || len(got) != 0 {
+		t.Errorf("a corrupt index entry is skipped: %v %v", got, err)
+	}
+}

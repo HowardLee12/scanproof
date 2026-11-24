@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/HowardLee12/scanproof/internal/exception"
 	"github.com/HowardLee12/scanproof/internal/model"
@@ -27,6 +28,7 @@ type pdfView struct {
 	Detail            string     `json:"detail"`
 	DigestShort       string     `json:"digest_short"`
 	ImageRows         []pdfRow   `json:"image_rows"`
+	ContextTitle      string     `json:"context_title"`
 	ContextRows       []pdfRow   `json:"context_rows"`
 	Tiles             []pdfTile  `json:"tiles"`
 	Rules             []pdfRule  `json:"rules"`
@@ -39,7 +41,7 @@ type pdfView struct {
 	ExceptionsExpired [][]string `json:"exceptions_expired"`
 	ExceptionsUnused  [][]string `json:"exceptions_unused"`
 	IntegrityRows     []pdfRow   `json:"integrity_rows"`
-	Imported          bool       `json:"imported"`
+	SecretsNote       string     `json:"secrets_note"`
 }
 
 type pdfRow struct {
@@ -97,6 +99,7 @@ func newPDFView(doc Document, resultsSHA256 string) pdfView {
 		Detail:            detail(doc),
 		DigestShort:       shortDigest(doc.Image.Digest),
 		ImageRows:         imageRows(doc.Image),
+		ContextTitle:      contextTitle(doc),
 		ContextRows:       contextRows(doc),
 		Tiles:             tiles(doc),
 		Rules:             rules(doc.Policy.Rules),
@@ -109,7 +112,7 @@ func newPDFView(doc Document, resultsSHA256 string) pdfView {
 		ExceptionsExpired: exceptionRows(doc.Exceptions.Expired),
 		ExceptionsUnused:  exceptionRows(doc.Exceptions.Unused),
 		IntegrityRows:     integrityRows(doc, resultsSHA256),
-		Imported:          doc.Scanner.Imported,
+		SecretsNote:       secretsNote(doc),
 	}
 }
 
@@ -142,11 +145,22 @@ func nonEmpty(rows []pdfRow) []pdfRow {
 	return out
 }
 
-func imageRows(img model.Image) []pdfRow {
-	size := formatBytes(img.SizeBytes)
-	if img.Layers > 0 {
-		size = fmt.Sprintf("%s · %s", size, plural(img.Layers, "layer", "layers"))
+func contextTitle(doc Document) string {
+	if doc.Runtime != nil {
+		return "Running image"
 	}
+	return "Change being released"
+}
+
+func imageRows(img model.Image) []pdfRow {
+	parts := []string{}
+	if b := formatBytes(img.SizeBytes); b != "" {
+		parts = append(parts, b)
+	}
+	if img.Layers > 0 {
+		parts = append(parts, plural(img.Layers, "layer", "layers"))
+	}
+	size := strings.Join(parts, " · ")
 	return nonEmpty([]pdfRow{
 		{Label: "Reference", Value: img.Reference},
 		{Label: "Digest", Value: img.Digest, Mono: true},
@@ -157,8 +171,41 @@ func imageRows(img model.Image) []pdfRow {
 	})
 }
 
+func secretsNote(doc Document) string {
+	switch {
+	case doc.Runtime != nil && doc.Runtime.Method == MethodSBOM:
+		return "This rescan checked the stored SBOM for new vulnerabilities. Secrets were checked when the image was first scanned."
+	case doc.Scanner.Imported:
+		return "These results were imported from an existing Trivy report, so ScanProof could not confirm that secret scanning was enabled."
+	}
+	return ""
+}
+
+func runtimeRows(doc Document) []pdfRow {
+	rt := doc.Runtime
+	locations := rt.Locations
+	more := ""
+	if len(locations) > 5 {
+		more = fmt.Sprintf(" and %d more", len(locations)-5)
+		locations = locations[:5]
+	}
+	method := "Pulled and scanned the running image"
+	if rt.Method == MethodSBOM {
+		method = "Checked the SBOM saved by report " + rt.SBOMFrom + " against the current vulnerability database"
+	}
+	return []pdfRow{
+		{Label: "Trigger", Value: "Rescan of a running image"},
+		{Label: "Running in", Value: strings.Join(locations, ", ") + more},
+		{Label: "Method", Value: method},
+		{Label: "Scanned", Value: formatTime(doc.ScannedAt)},
+	}
+}
+
 func contextRows(doc Document) []pdfRow {
 	c := doc.Context
+	if doc.Runtime != nil {
+		return runtimeRows(doc)
+	}
 	if !c.InCI() {
 		return []pdfRow{{Label: "Run", Value: "Not run in a recognised CI system"}}
 	}

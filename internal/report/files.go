@@ -99,3 +99,22 @@ func BuildManifestFor(dir, reportID string, generatedAt time.Time, imageDigest s
 		Files:       files,
 	}, nil
 }
+
+// VerifyAgainstManifest checks that data is the file name listed, with the
+// same SHA-256, in an encoded manifest. It returns the decoded manifest.
+func VerifyAgainstManifest(manifestData []byte, name string, data []byte) (Manifest, error) {
+	var m Manifest
+	if err := json.Unmarshal(manifestData, &m); err != nil {
+		return Manifest{}, fmt.Errorf("decode manifest: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	for _, file := range m.Files {
+		if file.Name == name {
+			if file.SHA256 != hex.EncodeToString(sum[:]) {
+				return Manifest{}, fmt.Errorf("%s does not match the SHA-256 in its manifest", name)
+			}
+			return m, nil
+		}
+	}
+	return Manifest{}, fmt.Errorf("manifest does not list %s", name)
+}

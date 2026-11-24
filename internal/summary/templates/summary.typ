@@ -48,22 +48,22 @@
 
 #section("Remediation against SLA")
 #data-table(
-  (20mm, 14mm, 16mm, 14mm, 22mm, 22mm, 1fr, 1fr),
-  ("Severity", "SLA days", "Opened", "Fixed", "Fixed in SLA", "Median days", "Open, in SLA", "Open, overdue"),
+  (19mm, 13mm, 14mm, 12mm, 20mm, 16mm, 1fr, 18mm, 18mm),
+  ("Severity", "SLA days", "Opened", "Fixed", "Fixed in SLA", "Median days", "Accepted or no fix", "Open, in SLA", "Open, overdue"),
   d.remediation.map(r => (badge(r.at(0)), ..r.slice(1))),
-  aligns: (left, right, right, right, right, right, right, right),
+  aligns: (left, right, right, right, right, right, right, right, right),
 )
-#note[A finding is tracked when a fix is available and no exception accepts it. It opens at the first scan that reports it and closes at the first later scan of the same image without it. Its deadline is the first-seen date plus the SLA for its severity.]
+#note[A finding is tracked when a fix is available and no exception accepts it. Scans of the same image name on the same day are combined, so a finding stays open while any running copy still has it. It counts as fixed when a later day's scans no longer report it; if it comes back, it reopens with its original deadline. Findings closed because an exception accepted them, or because the fix disappeared from the vulnerability data, are not counted as fixed. Open findings are judged as of #d.as_of.]
 
 #section("Fixed after SLA", note: str(d.fixed_late.len()) + " findings")
 #if d.fixed_late.len() == 0 {
   note[Every finding fixed in the period was fixed within its SLA.]
 } else {
   data-table(
-    (1fr, 30mm, 26mm, 18mm, 20mm, 20mm, 12mm),
-    ("Image", "ID", "Package", "Severity", "First seen", "Fixed", "Days"),
+    (1fr, 28mm, 24mm, 17mm, 18mm, 18mm, 18mm, 10mm),
+    ("Image", "ID", "Package", "Severity", "First seen", "Due", "Fixed", "Days"),
     d.fixed_late,
-    aligns: (left, left, left, left, left, left, right),
+    aligns: (left, left, left, left, left, left, left, right),
   )
 }
 
@@ -72,10 +72,10 @@
   note[No finding was open past its SLA at the end of the period.]
 } else {
   data-table(
-    (1fr, 30mm, 26mm, 18mm, 20mm, 20mm, 12mm),
-    ("Image", "ID", "Package", "Severity", "First seen", "Due", "Days"),
+    (1fr, 28mm, 24mm, 17mm, 18mm, 18mm, 18mm, 10mm),
+    ("Image", "ID", "Package", "Severity", "First seen", "Due", "Last seen", "Days"),
     d.overdue,
-    aligns: (left, left, left, left, left, left, right),
+    aligns: (left, left, left, left, left, left, left, right),
   )
 }
 

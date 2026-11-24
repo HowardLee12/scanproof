@@ -26,7 +26,7 @@ func TestMarkdown(t *testing.T) {
 	for _, want := range []string{
 		"## ScanProof period summary: 2026-07-01 to 2026-09-30",
 		"7 scans",
-		"| HIGH | 30 | 2 | 1 | 0 | 39 | 0 | 1 |",
+		"| HIGH | 30 | 2 | 1 | 0 | 39 | 0 | 0 | 1 |",
 		"CVE-B",
 		"CVE-C",
 		"population.csv",

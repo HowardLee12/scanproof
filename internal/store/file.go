@@ -21,24 +21,42 @@ type FileStore struct {
 	root string
 }
 
-// Put writes data to key. It fails if key already exists.
+// Put writes data to key. It fails if key already exists. The data is
+// written to a temporary file first and linked into place, so a failed write
+// never leaves a truncated file behind.
 func (s *FileStore) Put(_ context.Context, key string, data []byte, _ string) error {
 	if err := validateKey(key); err != nil {
 		return err
 	}
 	full := s.path(key)
-	if err := os.MkdirAll(filepath.Dir(full), fileStoreDirMode); err != nil {
-		return fmt.Errorf("create %s: %w", filepath.Dir(full), err)
+	dir := filepath.Dir(full)
+	if err := os.MkdirAll(dir, fileStoreDirMode); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	f, err := os.OpenFile(full, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileStoreFileMode)
+	tmp, err := os.CreateTemp(dir, ".upload-*")
 	if err != nil {
 		return fmt.Errorf("store %s: %w", key, err)
 	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
 		return fmt.Errorf("store %s: %w", key, err)
 	}
-	return f.Close()
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("store %s: %w", key, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("store %s: %w", key, err)
+	}
+	if err := os.Chmod(tmp.Name(), fileStoreFileMode); err != nil {
+		return fmt.Errorf("store %s: %w", key, err)
+	}
+	// Link fails if the key already exists, which keeps the store write-once.
+	if err := os.Link(tmp.Name(), full); err != nil {
+		return fmt.Errorf("store %s: %w", key, err)
+	}
+	return nil
 }
 
 // Get reads key.
@@ -63,7 +81,7 @@ func (s *FileStore) List(_ context.Context, prefix string) ([]string, error) {
 			}
 			return err
 		}
-		if d.IsDir() {
+		if d.IsDir() || strings.HasPrefix(d.Name(), ".upload-") {
 			return nil
 		}
 		rel, err := filepath.Rel(s.root, p)

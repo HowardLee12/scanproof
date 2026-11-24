@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/HowardLee12/scanproof/internal/report"
@@ -32,6 +33,7 @@ type tile struct {
 
 type pdfView struct {
 	SummaryID         string     `json:"summary_id"`
+	AsOf              string     `json:"as_of"`
 	GeneratedAt       string     `json:"generated_at"`
 	ToolVersion       string     `json:"tool_version"`
 	PeriodLabel       string     `json:"period_label"`
@@ -61,6 +63,7 @@ func newPDFView(s Summary, hashes map[string]string) pdfView {
 	population, omitted := populationView(s.Population)
 	return pdfView{
 		SummaryID:   s.SummaryID,
+		AsOf:        s.asOf.UTC().Format("2006-01-02 15:04 UTC"),
 		GeneratedAt: s.GeneratedAt.UTC().Format("2006-01-02 15:04:05 UTC"),
 		ToolVersion: s.Tool.Version,
 		PeriodLabel: fmt.Sprintf("%s to %s · %s", s.Period.From, s.Period.To, plural(s.Period.Days, "day", "days")),
@@ -73,8 +76,8 @@ func newPDFView(s Summary, hashes map[string]string) pdfView {
 			{"Open past SLA", strconv.Itoa(len(s.Overdue)), "at the end of the period", overdueAccent},
 		},
 		Remediation:       remediationRows(s.Remediation),
-		FixedLate:         findingRows(s.FixedLate, s.periodEnd, true),
-		Overdue:           findingRows(s.Overdue, s.periodEnd, false),
+		FixedLate:         findingRows(s.FixedLate, s.asOf, true),
+		Overdue:           findingRows(s.Overdue, s.asOf, false),
 		ExceptionsApplied: listOrNone(s.Exceptions.Applied),
 		ExceptionsExpired: listOrNone(s.Exceptions.Expired),
 		Population:        population,
@@ -92,7 +95,7 @@ func remediationRows(in []SeverityRemediation) [][]string {
 		}
 		rows = append(rows, []string{
 			r.Severity.String(), strconv.Itoa(r.SLADays), strconv.Itoa(r.Opened), strconv.Itoa(r.Fixed),
-			inSLA, formatDays(r.MedianDaysToFix), strconv.Itoa(r.OpenInSLA), strconv.Itoa(r.OpenOverdue),
+			inSLA, formatDays(r.MedianDaysToFix), strconv.Itoa(r.ClosedOther), strconv.Itoa(r.OpenInSLA), strconv.Itoa(r.OpenOverdue),
 		})
 	}
 	return rows
@@ -101,13 +104,13 @@ func remediationRows(in []SeverityRemediation) [][]string {
 func findingRows(findings []TrackedFinding, end time.Time, fixed bool) [][]string {
 	rows := make([][]string, 0, len(findings))
 	for _, f := range findings {
-		last := f.Due.Format("2006-01-02")
-		if fixed && f.FixedAt != nil {
-			last = f.FixedAt.Format("2006-01-02")
+		last := f.LastSeen.Format("2006-01-02")
+		if fixed && f.ClosedAt != nil {
+			last = f.ClosedAt.Format("2006-01-02")
 		}
 		rows = append(rows, []string{
-			f.Image, f.ID, f.Package, f.Severity.String(), f.FirstSeen.Format("2006-01-02"), last,
-			strconv.FormatFloat(round1(f.DaysOpen(end)), 'f', -1, 64),
+			f.Image, f.ID, f.Package, f.Severity.String(), f.FirstSeen.Format("2006-01-02"),
+			f.Due.Format("2006-01-02"), last, strconv.FormatFloat(round1(f.DaysOpen(end)), 'f', -1, 64),
 		})
 	}
 	return rows
@@ -131,7 +134,11 @@ func evidenceRows(s Summary, hashes map[string]string) []row {
 			rows = append(rows, row{Label: name + " SHA-256", Value: h, Mono: true})
 		}
 	}
-	return append(rows, row{Label: "Look-back", Value: fmt.Sprintf("%d days before the period, to date findings that were already open", s.Period.LookbackDays)})
+	rows = append(rows, row{Label: "Look-back", Value: fmt.Sprintf("%d days before the period, to date findings that were already open", s.Period.LookbackDays)})
+	if len(s.Incomplete) > 0 {
+		rows = append(rows, row{Label: "Incomplete uploads", Value: fmt.Sprintf("%d scan folders without a manifest were left out: %s", len(s.Incomplete), strings.Join(s.Incomplete, ", "))})
+	}
+	return rows
 }
 
 func plural(n int, one, many string) string {

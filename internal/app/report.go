@@ -94,9 +94,12 @@ func runReport(ctx context.Context, args []string, env Env) int {
 	}
 
 	period := summary.NewPeriod(opts.From, opts.To, opts.LookbackDays)
-	scans, err := summary.Load(ctx, st, period)
+	loaded, err := summary.Load(ctx, st, period)
 	if err != nil {
 		return fail(env, err)
+	}
+	for _, loc := range loaded.Incomplete {
+		fmt.Fprintf(env.Stderr, "scanproof: warning: skipping %s: upload did not finish (no manifest.json)\n", loc)
 	}
 	now := env.Now().UTC()
 	id, err := summary.NewSummaryID(now)
@@ -105,7 +108,7 @@ func runReport(ctx context.Context, args []string, env Env) int {
 	}
 	s := summary.Build(summary.Input{
 		ID: id, GeneratedAt: now, Tool: report.Tool{Name: "scanproof", Version: Version},
-		Period: period, Policy: pol, StoreLocation: st.Location(""), Scans: scans,
+		Period: period, Policy: pol, StoreLocation: st.Location(""), Scans: loaded.Scans, Incomplete: loaded.Incomplete,
 	})
 
 	written, err := writeSummary(ctx, opts, env, s)

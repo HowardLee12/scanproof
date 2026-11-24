@@ -1,0 +1,86 @@
+# Rescans every running image once a day and stores the results.
+# Before applying: set the image tag, the store URL, and the scanproof-store
+# and scanproof-registry secrets described in docs/rescan.md.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: scanproof-rescan
+  namespace: scanproof
+spec:
+  schedule: "0 3 * * *" # 03:00 UTC every day
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 21600 # stop after 6 hours
+      template:
+        spec:
+          serviceAccountName: scanproof-rescan
+          restartPolicy: Never
+          securityContext:
+            seccompProfile:
+              type: RuntimeDefault
+          # Keep the job off GPU nodes: it only needs CPU, and it must not
+          # trigger a GPU node scale-up. Adjust the label to your cluster.
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: nvidia.com/gpu.present
+                        operator: DoesNotExist
+          containers:
+            - name: rescan
+              image: ghcr.io/howardlee12/scanproof:v0.3.0
+              args:
+                - rescan
+                - --inventory=kubernetes
+                - --store=s3://acme-scan-evidence/prod
+                - --exceptions=/config/exceptions.yaml
+                - --out=/work/out
+              env:
+                - name: TRIVY_CACHE_DIR
+                  value: /work/trivy-cache
+                - name: AWS_REGION
+                  value: us-east-2
+              envFrom:
+                # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY for the store (or
+                # use workload identity instead), and the optional
+                # SCANPROOF_DISCORD_WEBHOOK_URL / SCANPROOF_SLACK_WEBHOOK_URL.
+                - secretRef:
+                    name: scanproof-store
+                # TRIVY_USERNAME / TRIVY_PASSWORD for pulling images that have
+                # no stored SBOM yet.
+                - secretRef:
+                    name: scanproof-registry
+                    optional: true
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 1Gi
+                  # Images without a stored SBOM are pulled here. Raise this
+                  # if you run large images (GPU images can exceed 10 GB).
+                  ephemeral-storage: 20Gi
+                limits:
+                  memory: 4Gi
+                  ephemeral-storage: 40Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: work
+                  mountPath: /work
+                - name: config
+                  mountPath: /config
+                  readOnly: true
+          volumes:
+            - name: work
+              emptyDir: {}
+            - name: config
+              configMap:
+                name: scanproof-config
+                optional: true

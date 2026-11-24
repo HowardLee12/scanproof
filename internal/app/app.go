@@ -34,6 +34,7 @@ const usage = `ScanProof scans a container image and records the result as evide
 Usage:
   scanproof scan [flags] IMAGE
   scanproof scan [flags] --trivy-results FILE
+  scanproof rescan --store URL --inventory kubernetes|ecs|file [flags]
   scanproof report --store URL --from YYYY-MM-DD --to YYYY-MM-DD [flags]
   scanproof version
 
@@ -51,6 +52,8 @@ func Run(ctx context.Context, args []string, env Env) int {
 		return runScan(ctx, args[1:], env)
 	case "report":
 		return runReport(ctx, args[1:], env)
+	case "rescan":
+		return runRescan(ctx, args[1:], env)
 	case "version", "--version":
 		fmt.Fprintf(env.Stdout, "scanproof %s\n", Version)
 		return ExitOK

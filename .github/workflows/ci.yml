@@ -64,6 +64,13 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/out:/out" -v "$PWD/store:/store" \
             scanproof:ci scan --out /out --store file:///store alpine:3.18.0
           test -s out/report.pdf && test -s out/results.json && test -s out/sbom.cdx.json && test -s out/manifest.json
+      - name: Rescan the running image from its stored SBOM
+        run: |
+          digest=$(jq -r .image.digest out/results.json)
+          echo "alpine:3.18.0@${digest}" > out/images.txt
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/out:/out" -v "$PWD/store:/store" \
+            scanproof:ci rescan --store file:///store --inventory file --images-file /out/images.txt --out /out/rescan
+          grep -l '"method": "sbom"' out/rescan/*/results.json
       - name: Build a period summary from the stored scan
         run: |
           today=$(date -u +%F)

@@ -21,6 +21,10 @@ Each scan is saved under the UTC day it ran:
     report.pdf        the auditor report (when Typst is available)
     sbom.cdx.json     the image's packages, used by rescans
     manifest.json     SHA-256 of every file above
+
+<prefix>/index/digests/sha256/<digest>/SR-20261124-7F3A9C.json
+                      points from the image digest to the scan, so a rescan
+                      can find the newest SBOM without listing every day
 ```
 
 With `--save`, period summaries are saved next to the scans:
@@ -118,6 +122,8 @@ Give CI and the summary job separate roles, each with only what it needs.
   }]
 }
 ```
+
+Rescans also read and write the digest index that points to stored SBOMs, so give a rescan job `s3:ListBucket` on `prod/index/*` and `prod/scans/*`, `s3:GetObject` on both, and `s3:PutObject` on both.
 
 **Summary role (reads scans, saves summaries)**:
 
@@ -250,5 +256,7 @@ scanproof report \
 - `--lookback-days` (default 90) also reads scans from before the period. A finding that was already open on day one then gets its real first-seen date, so its SLA deadline is right.
 - `--policy` supplies `sla_days`. Without it, Critical, High and Medium findings get 15, 30 and 90 days.
 - `--save` stores the summary in the bucket as well, under `summaries/`.
+- A scan counts only once its `manifest.json` exists, because the manifest is uploaded last. Folders without one, left by an interrupted upload, are listed in the summary as incomplete. A `results.json` that doesn't match the SHA-256 in its manifest stops the summary with an error.
+- Open findings are judged when the summary runs. If you make a summary before the period ends, a finding counts as overdue only if its deadline has already passed.
 
 The summary needs one `List` request per day of the period plus the look-back window. It then needs one `Get` request per scan.
