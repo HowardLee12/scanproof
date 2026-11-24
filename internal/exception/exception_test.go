@@ -1,6 +1,7 @@
 package exception
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,5 +142,24 @@ func TestExampleExceptionsAreValid(t *testing.T) {
 	list, err := Load("../../examples/exceptions.yaml")
 	if err != nil || len(list) != 2 {
 		t.Fatalf("got %d exceptions, %v", len(list), err)
+	}
+}
+
+func TestDateJSONRoundTrip(t *testing.T) {
+	list, _ := Parse([]byte(validYAML))
+	data, err := json.Marshal(list[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Exception
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Expires.String() != "2027-02-28" || back.ID != "EX-2026-004" {
+		t.Fatalf("round trip lost data: %+v", back)
+	}
+	var bad Date
+	if err := bad.UnmarshalText([]byte("soon")); err == nil {
+		t.Fatal("expected an error")
 	}
 }

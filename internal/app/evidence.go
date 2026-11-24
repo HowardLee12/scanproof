@@ -23,6 +23,7 @@ const (
 )
 
 var contentTypes = map[string]string{
+	".csv":  "text/csv; charset=utf-8",
 	".json": "application/json",
 	".md":   "text/markdown; charset=utf-8",
 	".pdf":  "application/pdf",
@@ -107,16 +108,24 @@ func writePDF(ctx context.Context, opts scanOptions, env Env, doc report.Documen
 // that was configured to be kept must not go missing silently.
 func uploadEvidence(ctx context.Context, st store.Store, outDir string, doc report.Document, names []string) (string, error) {
 	prefix := store.ScanPrefix(doc.ReportID, doc.GeneratedAt)
-	for _, name := range names {
-		data, err := os.ReadFile(filepath.Join(outDir, name))
-		if err != nil {
-			return "", fmt.Errorf("read %s for upload: %w", name, err)
-		}
-		if err := st.Put(ctx, prefix+name, data, contentType(name)); err != nil {
-			return "", err
-		}
+	if err := uploadFiles(ctx, st, outDir, prefix, names); err != nil {
+		return "", err
 	}
 	return st.Location(prefix), nil
+}
+
+// uploadFiles copies files from dir to the store under prefix, in order.
+func uploadFiles(ctx context.Context, st store.Store, dir, prefix string, names []string) error {
+	for _, name := range names {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return fmt.Errorf("read %s for upload: %w", name, err)
+		}
+		if err := st.Put(ctx, prefix+name, data, contentType(name)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func contentType(name string) string {

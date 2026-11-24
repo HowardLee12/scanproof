@@ -21,6 +21,7 @@ type harness struct {
 	stdout bytes.Buffer
 	stderr bytes.Buffer
 	client *http.Client
+	now    time.Time
 }
 
 func newHarness() *harness {
@@ -29,10 +30,15 @@ func newHarness() *harness {
 
 func (h *harness) run(args ...string) int {
 	return Run(context.Background(), args, Env{
-		Getenv:     func(k string) string { return h.env[k] },
-		Stdout:     &h.stdout,
-		Stderr:     &h.stderr,
-		Now:        func() time.Time { return time.Date(2026, 11, 24, 8, 16, 48, 0, time.UTC) },
+		Getenv: func(k string) string { return h.env[k] },
+		Stdout: &h.stdout,
+		Stderr: &h.stderr,
+		Now: func() time.Time {
+			if !h.now.IsZero() {
+				return h.now
+			}
+			return time.Date(2026, 11, 24, 8, 16, 48, 0, time.UTC)
+		},
 		HTTPClient: h.client,
 	})
 }

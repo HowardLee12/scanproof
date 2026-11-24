@@ -25,7 +25,7 @@ func TestRenderPDFWritesTemplateAndDataThenRunsTypst(t *testing.T) {
 		if err := json.Unmarshal(raw, &data); err != nil {
 			return nil, err
 		}
-		tpl, err := os.ReadFile(filepath.Join(root, "report.typ"))
+		tpl, err := os.ReadFile(filepath.Join(root, "main.typ"))
 		template = string(tpl)
 		return nil, err
 	}
@@ -45,7 +45,7 @@ func TestRenderPDFWritesTemplateAndDataThenRunsTypst(t *testing.T) {
 	if data.ReportID != "SR-20261124-7F3A9C" || data.Verdict != "WARN" {
 		t.Errorf("data.json not written correctly: %+v", data.ReportID)
 	}
-	if !strings.Contains(template, `json("data.json")`) {
+	if !strings.Contains(template, `json("data.json")`) || !strings.Contains(template, `import "common.typ"`) {
 		t.Error("template should read data.json")
 	}
 }

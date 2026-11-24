@@ -83,9 +83,14 @@ func (s *FileStore) List(_ context.Context, prefix string) ([]string, error) {
 	return keys, nil
 }
 
-// Location returns a file:// URL for key.
+// Location returns a file:// URL for key. A key ending in "/" is a folder
+// and keeps its trailing slash.
 func (s *FileStore) Location(key string) string {
-	return "file://" + s.path(key)
+	loc := "file://" + s.path(key)
+	if strings.HasSuffix(key, "/") {
+		loc += "/"
+	}
+	return loc
 }
 
 func (s *FileStore) path(key string) string {

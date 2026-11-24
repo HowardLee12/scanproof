@@ -11,7 +11,7 @@ It runs [Trivy](https://github.com/aquasecurity/trivy) for vulnerabilities and e
 | `report.pdf` | A short report for auditors: verdict, image digest, change, findings, exceptions |
 | `manifest.json` | SHA-256 of each file, so anyone can check later that nothing was changed |
 
-It can also post the result to Discord or Slack.
+It can also post the result to Discord or Slack, keep every scan in an S3 bucket, and turn a quarter of stored scans into a **period summary** for auditors: coverage, remediation against your SLA, and the full list of scans to sample from.
 
 ScanProof does not replace your scanner or your registry's scanning. It answers a different question: for every image you deployed, was it checked before release, what was known at the time, and can you prove it?
 
@@ -50,6 +50,24 @@ trivy image --format json --output trivy.json my-image:1.0
 scanproof scan --trivy-results trivy.json --out evidence
 ```
 
+## Keeping evidence and period summaries
+
+Add `--store` (or the `store` input of the action) to upload every scan to an S3 bucket, an S3-compatible service, or a directory:
+
+```sh
+scanproof scan --store s3://acme-scan-evidence/prod example-api:1.0
+```
+
+At the end of a period, build the summary an auditor asks for:
+
+```sh
+scanproof report --store s3://acme-scan-evidence/prod --from 2026-07-01 --to 2026-09-30 --save
+```
+
+It writes `summary.pdf`, `summary.json`, `summary.md` and `population.csv` (one row per scan, for sampling). Findings are followed from the first scan that reports them to the first later scan of the same image without them, and measured against the `sla_days` in your policy.
+
+**[docs/storage.md](docs/storage.md)** explains how to set up the bucket: Object Lock retention, least-privilege IAM for CI and for the summary job, GitHub OIDC, S3-compatible services and their settings.
+
 ## Policy
 
 Without a policy file, ScanProof **warns** about fixable Critical vulnerabilities and about any embedded secret. Start in warn mode, look at what it finds for a couple of weeks, then switch to enforce.
@@ -61,6 +79,10 @@ fail_on:
   severity: CRITICAL  # lowest severity that counts as a violation
   fixable_only: true  # only count vulnerabilities that have a fix
   secrets: true       # count every embedded secret
+sla_days:             # remediation deadlines used by period summaries
+  critical: 15
+  high: 30
+  medium: 90
 ```
 
 | Verdict | Meaning | Exit code |
@@ -117,6 +139,8 @@ scanproof scan [flags] IMAGE
   --mode warn|enforce    overrides the policy file
   --out DIR              output directory (default scanproof-out)
   --pdf=false            skip report.pdf
+  --sbom=false           skip sbom.cdx.json
+  --store URL            upload evidence to s3://bucket/prefix or file:///path
   --notify WHEN          violation | always | never (default violation)
   --trivy-results FILE   use an existing Trivy JSON report
   --trivy PATH           trivy binary (default trivy)
@@ -124,11 +148,19 @@ scanproof scan [flags] IMAGE
   --timeout DURATION     scan time limit (default 30m)
 ```
 
-In GitHub Actions, ScanProof also appends the summary to the job page, adds a warning or error annotation, and sets the step outputs `verdict`, `report-id`, `violations`, `results` and `evidence-dir`.
+In GitHub Actions, ScanProof also appends the summary to the job page, adds a warning or error annotation, and sets the step outputs `verdict`, `report-id`, `violations`, `results`, `evidence-dir` and, with a store, `evidence-url`.
 
-## Keeping evidence
+```
+scanproof report --store URL --from YYYY-MM-DD --to YYYY-MM-DD [flags]
 
-CI artifacts expire (GitHub keeps them for 90 days by default). For audits, copy the output directory to storage that cannot be changed or deleted, for example an S3 bucket with Object Lock in compliance mode, and keep it for at least the audit period plus the time the audit takes.
+  --lookback-days N      also read N days before the period (default 90)
+  --policy FILE          policy file with sla_days
+  --out DIR              output directory (default scanproof-summary)
+  --pdf=false            skip summary.pdf
+  --save                 also save the summary to the store
+```
+
+## SOC 2
 
 The PDF maps the report to SOC 2 criteria CC7.1 and CC8.1 for convenience. Your auditor decides whether the evidence is sufficient.
 
@@ -142,10 +174,8 @@ The PDF maps the report to SOC 2 criteria CC7.1 and CC8.1 for convenience. Your 
 
 ## Roadmap
 
-- Daily rescans of images running in Amazon ECS and Kubernetes
-- Period summary report and a population list for audit sampling
+- Daily rescans of images running in Amazon ECS and Kubernetes, from the stored SBOMs
 - Malware scanning with ClamAV and YARA
-- Remediation SLA tracking
 
 ## Development
 

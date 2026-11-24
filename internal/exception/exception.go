@@ -35,6 +35,16 @@ func (d *Date) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+// UnmarshalText reads YYYY-MM-DD, so results.json can be decoded again.
+func (d *Date) UnmarshalText(text []byte) error {
+	parsed, err := time.Parse(dateLayout, strings.TrimSpace(string(text)))
+	if err != nil {
+		return fmt.Errorf("date %q must use the form YYYY-MM-DD", text)
+	}
+	*d = Date{t: parsed}
+	return nil
+}
+
 // MarshalText writes the date as YYYY-MM-DD.
 func (d Date) MarshalText() ([]byte, error) {
 	return []byte(d.String()), nil

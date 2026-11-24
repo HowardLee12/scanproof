@@ -11,3 +11,11 @@ fail_on:
   fixable_only: true
   # Count every embedded secret (keys, tokens, passwords) as a violation.
   secrets: true
+
+# Days to fix a vulnerability after it is first found with a fix available.
+# Period summaries report remediation against these deadlines. 0 = no deadline.
+sla_days:
+  critical: 15
+  high: 30
+  medium: 90
+  low: 0

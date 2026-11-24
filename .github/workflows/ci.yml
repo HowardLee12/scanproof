@@ -27,6 +27,30 @@ jobs:
       - name: Coverage
         run: go tool cover -func=coverage.out | tail -1
 
+  s3-integration:
+    runs-on: ubuntu-latest
+    services:
+      rustfs:
+        # An S3-compatible server, pinned by digest.
+        image: rustfs/rustfs@sha256:ee717072290bec9b11abfc0365f8310b00df1cd9b3639943edae47bdef05044a
+        ports: ["9000:9000"]
+        env:
+          RUSTFS_ACCESS_KEY: scanproof
+          RUSTFS_SECRET_KEY: scanproof-test-pw
+    env:
+      SCANPROOF_S3_TEST_ENDPOINT: http://localhost:9000
+      AWS_ACCESS_KEY_ID: scanproof
+      AWS_SECRET_ACCESS_KEY: scanproof-test-pw
+      AWS_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Wait for the S3 server
+        run: for i in $(seq 1 30); do curl -s -o /dev/null localhost:9000 && exit 0; sleep 2; done; exit 1
+      - run: go test -run TestS3StoreAgainstRealService -v ./internal/store/
+
   image:
     runs-on: ubuntu-latest
     needs: test
@@ -36,10 +60,16 @@ jobs:
         run: docker build --build-arg VERSION=ci-${{ github.sha }} -t scanproof:ci .
       - name: Scan a known-vulnerable image end to end
         run: |
-          mkdir -p out
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/out:/out" \
-            scanproof:ci scan --out /out alpine:3.18.0
-          test -s out/report.pdf && test -s out/results.json && test -s out/manifest.json
+          mkdir -p out store
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/out:/out" -v "$PWD/store:/store" \
+            scanproof:ci scan --out /out --store file:///store alpine:3.18.0
+          test -s out/report.pdf && test -s out/results.json && test -s out/sbom.cdx.json && test -s out/manifest.json
+      - name: Build a period summary from the stored scan
+        run: |
+          today=$(date -u +%F)
+          docker run --rm -v "$PWD/out:/out" -v "$PWD/store:/store" \
+            scanproof:ci report --store file:///store --from "$today" --to "$today" --out /out/summary
+          test -s out/summary/summary.pdf && test -s out/summary/population.csv
       - uses: actions/upload-artifact@v4
         with:
           name: sample-evidence
