@@ -210,7 +210,7 @@ The PDF maps the report to SOC 2 criteria CC7.1 and CC8.1 for convenience. Your 
 
 ## Security notes
 
-- Trivy settings files in the working directory, such as the scanned repository (`trivy.yaml`, `.trivyignore`, `trivy-secret.yaml`), and `TRIVY_*` variables that filter results are ignored. The only way to accept a finding is an exception with a reason and an expiry date. Registry login, cache and database mirror variables are still passed through.
+- Trivy settings files in the working directory, such as the scanned repository (`trivy.yaml`, `.trivyignore`, `trivy-secret.yaml`), and `TRIVY_*` variables that filter results are ignored. Image scans use Trivy's built-in secret rules, whose allow rules skip paths such as tests, examples and system directories (the report lists them); directory scans switch those allow rules off. The only way to accept a finding is an exception with a reason and an expiry date. Registry login, cache and database mirror variables are still passed through.
 - Imported Trivy reports (`--trivy-results`) must come from `trivy image`, and the report says that secret scanning could not be verified.
 - Secret findings record the rule, file and line only. The matched text is never stored or printed.
 - Values from scan results are passed to the PDF template as data, never as template code.

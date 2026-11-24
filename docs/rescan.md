@@ -24,10 +24,10 @@ scanproof rescan --store s3://acme-scan-evidence/prod --inventory kubernetes,fil
 | `--inventory` | required | `kubernetes`, `ecs` or `file`, or a comma-separated list such as `kubernetes,file`; the results are merged by digest |
 | `--namespace` | all | Kubernetes: limit to one namespace |
 | `--ecs-cluster` | all clusters | ECS: cluster name or ARN; repeat for more |
-| `--images-file` | | File: one image or directory per line (see [below](#the-images-file)); only read with `file` in `--inventory` (otherwise a warning) |
+| `--images-file` | | File: one image or directory per line (see [below](#the-images-file)); only read with `file` in `--inventory` (otherwise it is reported as a failure) |
 | `--exceptions` | | Exceptions that apply to running images (see below) |
 | `--policy` | built-in | Policy file |
-| `--pull-missing` | `true` | Pull images that have no stored SBOM (never directories) |
+| `--pull-missing` | `true` | Pull images that have no usable stored SBOM (never directories). With `false`, an image that was never scanned is skipped, but one whose stored scans exist and cannot be used is reported as failed |
 | `--pdf` | `false` | Also write a `report.pdf` for every image and directory |
 | `--notify` | `violation` | When to post the run summary: `violation`, `always`, `never` |
 | `--timeout` | `30m` | Time limit per image or directory |
@@ -110,7 +110,7 @@ dir:acme-vllm:0.9.1@sha256:22f1…              gpu-cluster/inference/acme-vllm
 - An image line is an image reference. Pin it to a digest; then the rescan can use the stored SBOM and checks exactly what is deployed.
 - A directory line is `dir:NAME[:VERSION]@sha256:<tree digest>`. The digest is required: it is how the stored scan is found. `scanproof scan --dir` prints the line. See [directories.md](directories.md).
 - Optionally, whitespace and a free-text location follow, recorded as where the image or directory runs. Without one, the location is "listed in" and the file's path.
-- A malformed line is reported as failed, with its line number, and the other lines are still rescanned. A line that starts with `dir:` is always a directory.
+- A malformed line is reported as failed, with its line number, and the other lines are still rescanned: an image reference that does not parse or starts with `-`, a digest that is not a full `sha256:` and 64 hex characters, or a malformed `dir:` line. A line that starts with `dir:` is always a directory.
 
 To rescan both what runs in Kubernetes and the entries in the file, use `--inventory kubernetes,file`. In the CronJob, put the file in the `scanproof-config` ConfigMap; [deploy/kubernetes/cronjob.yaml](../deploy/kubernetes/cronjob.yaml) has the lines to uncomment:
 
@@ -121,7 +121,7 @@ kubectl -n scanproof create configmap scanproof-config \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-A directory is always checked from its stored SBOM, verified against its manifest (same SHA-256, same tree digest, artifact type `directory`). If none was ever stored, the line is reported as failed with "no stored scan for this directory; run scanproof scan --dir on a host that has it", in the output and in the chat message. If stored scans exist but none can be used, the failure names the newest one and why, for example an SBOM that no longer matches its manifest.
+A directory is always checked from its stored SBOM, verified against its manifest (same SHA-256, same tree digest, artifact type `directory`). If none was ever stored, the line is reported as failed with "no stored scan for this directory; run scanproof scan --dir on a host that has it", in the output and in the chat message. If stored scans exist but none can be used, the failure names the newest one and why, for example an SBOM that no longer matches its manifest. The same applies to an image with `--pull-missing=false`. Index entries that cannot be read are counted: if none of a digest's entries can be read, a directory (or an image that may not be pulled) fails with "N stored index entries for this digest could not be read".
 
 ## In the period summary
 
