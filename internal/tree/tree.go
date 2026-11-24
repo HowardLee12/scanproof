@@ -215,7 +215,11 @@ func openRoot(root string) (*os.Root, Stamp, error) {
 		return nil, Stamp{}, fmt.Errorf("open %s: %w", root, err)
 	}
 	opened, err := r.Stat(".")
-	if err != nil || !os.SameFile(info, opened) {
+	if err != nil {
+		r.Close()
+		return nil, Stamp{}, fmt.Errorf("read %s: %w", root, err)
+	}
+	if !os.SameFile(info, opened) {
 		r.Close()
 		return nil, Stamp{}, changed("the directory itself")
 	}

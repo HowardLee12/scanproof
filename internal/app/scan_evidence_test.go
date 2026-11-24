@@ -72,3 +72,18 @@ func TestOutputInsideTheRootIsFoundWhateverTheCase(t *testing.T) {
 		t.Fatalf("code %d, stderr %q", code, h.stderr.String())
 	}
 }
+
+func TestStoredButNotIndexedIsReported(t *testing.T) {
+	storeDir := t.TempDir()
+	writeFile(t, filepath.Join(storeDir, "index"), "not a directory")
+	out := t.TempDir()
+	h := newHarness()
+	code := h.run("scan", "--trivy", fakeTrivy(t), "--out", out, "--pdf=false", "--store", "file://"+storeDir, "--", "alpine:3.18.0")
+	var doc map[string]any
+	readJSON(t, filepath.Join(out, "results.json"), &doc)
+	stderr := h.stderr.String()
+	if code != ExitError || !strings.Contains(stderr, "report "+doc["report_id"].(string)+" is stored but not indexed") ||
+		!strings.Contains(stderr, "rescans will not find it") {
+		t.Fatalf("code %d, stderr %q", code, stderr)
+	}
+}

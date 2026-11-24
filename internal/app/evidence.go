@@ -129,7 +129,8 @@ func uploadEvidence(ctx context.Context, st store.Store, outDir string, doc repo
 	if _, err := store.DigestIndexPrefix(doc.Image.Digest); err == nil && contains(names, sbomFile) {
 		entry := store.IndexEntry{ReportID: doc.ReportID, ScanPrefix: prefix, HasSBOM: true}
 		if err := store.PutIndexEntry(ctx, st, doc.Image.Digest, entry); err != nil {
-			return "", err
+			return "", fmt.Errorf("report %s is stored but not indexed, so rescans will not find it (stored at %s): %w",
+				doc.ReportID, st.Location(prefix), err)
 		}
 	}
 	return st.Location(prefix), nil
