@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -32,13 +33,15 @@ func runScan(ctx context.Context, args []string, env Env) int {
 	if err != nil {
 		return fail(env, err)
 	}
-	doc, location, err := scanAndStore(ctx, opts, env)
+	done, err := scanAndStore(ctx, opts, env)
 	if err != nil {
 		return fail(env, err)
 	}
-	writeGitHubOutputs(env, doc, opts.OutDir, location)
+	doc := done.doc
+	writeGitHubOutputs(env, doc, opts.OutDir, done.location)
 	sendNotifications(ctx, opts, env, doc)
-	announce(env, doc, opts.OutDir, location)
+	announce(env, doc, opts.OutDir, done.location)
+	announceInventoryLine(env, doc, done.indexed)
 
 	if doc.Verdict == policy.VerdictFail {
 		return ExitViolation
@@ -46,40 +49,62 @@ func runScan(ctx context.Context, args []string, env Env) int {
 	return ExitOK
 }
 
+// scanned is a finished scan: the report, where it was stored, and whether
+// it was stored with an SBOM and indexed, so rescans can check it.
+type scanned struct {
+	doc      report.Document
+	location string
+	indexed  bool
+}
+
 // scanAndStore scans, writes the evidence files and uploads them when a
-// store is configured. It returns the report and the store location.
-func scanAndStore(ctx context.Context, opts scanOptions, env Env) (report.Document, string, error) {
+// store is configured.
+func scanAndStore(ctx context.Context, opts scanOptions, env Env) (scanned, error) {
 	// Open the store first, so a bad URL fails before a long scan.
 	var st store.Store
 	if opts.Store != "" {
 		var err error
 		if st, err = store.Open(ctx, opts.Store); err != nil {
-			return report.Document{}, "", err
+			return scanned{}, err
 		}
 	}
 	setup, err := loadSetup(opts.PolicyPath, opts.Mode, opts.Exceptions)
 	if err != nil {
-		return report.Document{}, "", err
+		return scanned{}, err
 	}
-	// One deadline for the whole scan. Trivy gets the same limit, so it can
-	// report its own timeout before this context ends.
+	// One deadline for the whole scan, including both reads of a directory
+	// and the malware scan. Trivy alone stops at --timeout, so it can report
+	// its own timeout before this context ends.
 	scanCtx, cancel := context.WithTimeout(ctx, opts.Timeout+time.Minute)
 	defer cancel()
 	scan, err := scanTarget(scanCtx, opts, env)
 	if err != nil {
-		return report.Document{}, "", err
+		return scanned{}, err
 	}
 	ci := cicontext.FromEnv(env.Getenv)
 	doc, err := buildDocument(env, setup, scan.Result, scanTrigger(ci), ci, nil)
 	if err != nil {
-		return report.Document{}, "", err
+		return scanned{}, err
 	}
 	written, err := writeEvidence(ctx, opts, env, doc, scan.Raw)
+	if err == nil {
+		err = requireSBOM(opts, st, written)
+	}
 	if err != nil || st == nil {
-		return doc, "", err
+		return scanned{doc: doc}, err
 	}
 	location, err := uploadEvidence(ctx, st, opts.OutDir, doc, written)
-	return doc, location, err
+	return scanned{doc: doc, location: location, indexed: contains(written, sbomFile)}, err
+}
+
+// requireSBOM stops a stored directory scan whose SBOM could not be
+// written: a rescan can only ever check a directory through its SBOM.
+func requireSBOM(opts scanOptions, st store.Store, written []string) error {
+	if opts.Dir.Enabled && st != nil && opts.SBOM && !contains(written, sbomFile) {
+		return errors.New("the directory's SBOM could not be written (see the warning above), so scanproof rescan " +
+			"could never check it; nothing was stored")
+	}
+	return nil
 }
 
 func scanTrigger(ci cicontext.Context) string {
@@ -95,6 +120,7 @@ func scanTarget(ctx context.Context, opts scanOptions, env Env) (trivy.Scan, err
 	if opts.Dir.Enabled {
 		return scanDirectory(ctx, opts, env)
 	}
+	opts = withMalwarePlatform(opts)
 	scan, err := scanImage(ctx, opts)
 	if err != nil || !opts.Malware.Enabled {
 		return scan, err
@@ -125,6 +151,17 @@ func scanImage(ctx context.Context, opts scanOptions) (trivy.Scan, error) {
 	return runner.Scan(ctx, opts.Image)
 }
 
+// withMalwarePlatform picks one platform for both scans when a malware scan
+// runs: without one, Trivy pulls linux/amd64 from a registry on any machine
+// while the malware scan pulls the machine's own platform. (An image found
+// in the Docker daemon is used as it is by both.)
+func withMalwarePlatform(opts scanOptions) scanOptions {
+	if opts.Malware.Enabled && opts.Platform == "" {
+		opts.Platform = "linux/" + runtime.GOARCH
+	}
+	return opts
+}
+
 // sameImage makes sure the vulnerability and malware scans looked at the same
 // image (the local daemon and the registry can hold different images under
 // one tag, and multi-platform images have one image per platform).
@@ -148,7 +185,7 @@ func scanMalware(ctx context.Context, opts scanOptions, env Env) (*model.Malware
 		// on the disk chosen for the scan.
 		os.Setenv("TMPDIR", m.WorkDir)
 	}
-	result, err := malwareScanner(opts).Scan(ctx, opts.Image)
+	result, err := malwareScanner(opts, env).Scan(ctx, opts.Image)
 	if err != nil {
 		return nil, fmt.Errorf("malware scan: %w", err)
 	}
@@ -156,7 +193,7 @@ func scanMalware(ctx context.Context, opts scanOptions, env Env) (*model.Malware
 }
 
 // malwareScanner configures the engines from the command line.
-func malwareScanner(opts scanOptions) malware.Scanner {
+func malwareScanner(opts scanOptions, env Env) malware.Scanner {
 	m := opts.Malware
 	scanner := malware.Scanner{
 		ClamAV:       malware.NewClamAV(m.ClamscanBin, m.ClamAVDB),
@@ -164,6 +201,7 @@ func malwareScanner(opts scanOptions) malware.Scanner {
 		TryDaemon:    m.DockerDaemon,
 		WorkDir:      m.WorkDir,
 		Platform:     opts.Platform,
+		Warn:         func(msg string) { fmt.Fprintf(env.Stderr, "scanproof: warning: %s\n", msg) },
 	}
 	if m.YaraRules != "" {
 		y := malware.NewYara(m.YaraBin, m.YaraRules)

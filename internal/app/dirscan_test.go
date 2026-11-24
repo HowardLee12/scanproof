@@ -17,7 +17,7 @@ func makeSoftwareDir(t *testing.T) string {
 	root := t.TempDir()
 	files := map[string]string{
 		"venv/lib/python3.12/site-packages/requests-2.25.0.dist-info/METADATA": "Metadata-Version: 2.1\nName: requests\nVersion: 2.25.0\n",
-		"worker/bin/example-worker": "\x7fELF fake",
+		"worker/bin/example-worker": "\x7fELF fake worker binary",
 		"tests/eicar.com":           "EICAR-TEST",
 	}
 	for name, content := range files {

@@ -24,10 +24,6 @@ func announce(env Env, doc report.Document, outDir, location string) {
 	line := fmt.Sprintf("ScanProof %s: %s · %s · %s mode · report %s · evidence in %s",
 		doc.Verdict, report.ArtifactLabel(doc), violations, doc.Policy.Mode, doc.ReportID, where)
 	fmt.Fprintln(env.Stdout, line)
-	if doc.IsDirectory() {
-		// Ready to paste into the rescan images file.
-		fmt.Fprintf(env.Stdout, "Rescan inventory line: %s@%s\n", doc.Image.Reference, doc.Image.Digest)
-	}
 
 	if env.Getenv("GITHUB_ACTIONS") != "true" {
 		return
@@ -38,6 +34,20 @@ func announce(env Env, doc report.Document, outDir, location string) {
 	case policy.VerdictFail:
 		fmt.Fprintf(env.Stdout, "::error title=ScanProof::%s\n", escapeAnnotation(line))
 	}
+}
+
+// announceInventoryLine prints, after a directory scan, the line to add to
+// the rescan images file, or why rescans cannot check the directory.
+func announceInventoryLine(env Env, doc report.Document, indexed bool) {
+	if !doc.IsDirectory() {
+		return
+	}
+	if !indexed {
+		fmt.Fprintln(env.Stdout, "This scan was not stored with an SBOM, so scanproof rescan cannot check this directory; "+
+			"scan it with --store (and without --sbom=false) to rescan it.")
+		return
+	}
+	fmt.Fprintf(env.Stdout, "Rescan inventory line: %s@%s\n", doc.Image.Reference, doc.Image.Digest)
 }
 
 // escapeAnnotation encodes characters that GitHub workflow commands reserve.

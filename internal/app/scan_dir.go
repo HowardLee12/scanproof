@@ -2,27 +2,33 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 
 	"github.com/HowardLee12/scanproof/internal/model"
 	"github.com/HowardLee12/scanproof/internal/tree"
 	"github.com/HowardLee12/scanproof/internal/trivy"
 )
 
-// scanDirectory scans software installed in a directory. The tree digest is
-// computed before Trivy runs and again afterwards: by the malware scan,
-// which hashes exactly the bytes it scans, or by a second digest pass. If
-// the two differ the directory changed during the scan, and no evidence is
-// written for a mix of two versions.
+// scanDirectory scans software installed in a directory. The directory is
+// read before Trivy runs and again afterwards (by the malware scan, when it
+// runs, which hashes exactly the bytes it scans). Both reads must find the
+// same tree with the same file identities and times, so a change during
+// the scan, even one that was reverted, writes no evidence.
 func scanDirectory(ctx context.Context, opts scanOptions, env Env) (trivy.Scan, error) {
 	root, err := tree.ResolveRoot(opts.Dir.Path)
 	if err != nil {
 		return trivy.Scan{}, err
 	}
+	if err := refuseWritesInside(root, opts, env); err != nil {
+		return trivy.Scan{}, err
+	}
 	if !opts.SBOM {
 		fmt.Fprintln(env.Stderr, "scanproof: warning: --sbom=false: rescans cannot check this directory without its stored SBOM")
 	}
-	before, err := tree.Digest(ctx, root, nil)
+	binary := map[string]bool{}
+	before, err := tree.Digest(ctx, root, sniffBinary(binary))
 	if err != nil {
 		return trivy.Scan{}, fmt.Errorf("tree digest of %s: %w", root, err)
 	}
@@ -34,37 +40,49 @@ func scanDirectory(ctx context.Context, opts scanOptions, env Env) (trivy.Scan, 
 	if err != nil {
 		return trivy.Scan{}, err
 	}
-	if after != before.Digest {
-		return trivy.Scan{}, fmt.Errorf("%s changed while it was being scanned (tree digest %s before, %s after); "+
-			"scan it again when nothing is writing to it", root, before.Digest, after)
+	if err := tree.Unchanged(before, after); err != nil {
+		return trivy.Scan{}, fmt.Errorf("%s was read before and after Trivy and differed: %w", root, err)
 	}
-	return trivy.Scan{Result: directoryResult(scan.Result, opts.Dir, root, before, malware), Raw: scan.Raw}, nil
+	coverage := trivy.Coverage(before.Entries, func(p string) bool { return binary[p] })
+	return trivy.Scan{Result: directoryResult(scan.Result, opts.Dir, root, before, malware, coverage), Raw: scan.Raw}, nil
 }
 
-// readDirectoryAgain reads the directory a second time and returns its tree
-// digest, with the malware scan when one was asked for.
-func readDirectoryAgain(ctx context.Context, opts scanOptions, env Env, root string) (*model.MalwareScan, string, error) {
+// sniffBinary records the files whose first bytes make Trivy's secret
+// scanner treat them as binary.
+func sniffBinary(binary map[string]bool) tree.ContentFunc {
+	return func(e tree.Entry, r io.Reader) error {
+		head := make([]byte, trivy.BinaryHeadBytes)
+		n, err := io.ReadFull(r, head)
+		if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return err
+		}
+		if trivy.IsBinary(head[:n]) {
+			binary[e.Path] = true
+		}
+		return nil
+	}
+}
+
+// readDirectoryAgain reads the directory a second time, with the malware
+// scan when one was asked for.
+func readDirectoryAgain(ctx context.Context, opts scanOptions, env Env, root string) (*model.MalwareScan, tree.Result, error) {
 	if !opts.Malware.Enabled {
 		res, err := tree.Digest(ctx, root, nil)
 		if err != nil {
-			return nil, "", fmt.Errorf("tree digest of %s: %w", root, err)
+			return nil, tree.Result{}, fmt.Errorf("tree digest of %s: %w", root, err)
 		}
-		return nil, res.Digest, nil
+		return nil, res, nil
 	}
 	if opts.Malware.Update {
 		updateSignatures(ctx, opts.Malware, env)
 	}
-	m, err := malwareScanner(opts).ScanDir(ctx, root)
-	if err != nil {
-		return nil, "", err
-	}
-	return m, m.TreeDigest, nil
+	return malwareScanner(opts, env).ScanDir(ctx, root)
 }
 
 // directoryResult describes the scan as a directory: its reference is
 // dir:NAME[:VERSION] and its digest is the tree digest, so the evidence store
 // indexes it like an image and rescans find its SBOM by tree digest.
-func directoryResult(res model.ScanResult, d dirOptions, root string, t tree.Result, m *model.MalwareScan) model.ScanResult {
+func directoryResult(res model.ScanResult, d dirOptions, root string, t tree.Result, m *model.MalwareScan, c model.Coverage) model.ScanResult {
 	return model.ScanResult{
 		ArtifactType: model.ArtifactDirectory,
 		Image: model.Image{
@@ -75,7 +93,7 @@ func directoryResult(res model.ScanResult, d dirOptions, root string, t tree.Res
 		},
 		Directory: &model.Directory{
 			Name: d.Name, Version: d.Version, TreeDigest: t.Digest, Path: root,
-			Files: t.Files, Dirs: t.Dirs, Symlinks: t.Symlinks, Bytes: t.Bytes,
+			Files: t.Files, Dirs: t.Dirs, Symlinks: t.Symlinks, Bytes: t.Bytes, Coverage: &c,
 		},
 		Scanner:         res.Scanner,
 		ScannedAt:       res.ScannedAt,
