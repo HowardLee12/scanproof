@@ -3,6 +3,7 @@
 package trivy
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -215,4 +216,9 @@ func ParseVersion(r io.Reader) (VersionInfo, error) {
 		info.DBUpdatedAt = &updated
 	}
 	return info, nil
+}
+
+// ParseBytes is Parse for an in-memory report.
+func ParseBytes(data []byte) (model.ScanResult, error) {
+	return Parse(bytes.NewReader(data))
 }

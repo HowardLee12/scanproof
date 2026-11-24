@@ -19,6 +19,8 @@ type scanOptions struct {
 	Mode         policy.Mode // empty means "use the policy file"
 	OutDir       string
 	PDF          bool
+	SBOM         bool
+	Store        string
 	Notify       notify.When
 	TrivyResults string
 	TrivyBin     string
@@ -36,6 +38,8 @@ func parseScanOptions(args []string, stderr io.Writer) (scanOptions, error) {
 	fs.StringVar(&mode, "mode", "", "warn or enforce; overrides the policy file")
 	fs.StringVar(&opts.OutDir, "out", "scanproof-out", "directory for results.json, summary.md, report.pdf and manifest.json")
 	fs.BoolVar(&opts.PDF, "pdf", true, "write report.pdf (needs typst)")
+	fs.BoolVar(&opts.SBOM, "sbom", true, "write sbom.cdx.json, used by later rescans (needs trivy)")
+	fs.StringVar(&opts.Store, "store", "", "upload the evidence to s3://bucket/prefix or file:///path")
 	fs.StringVar(&when, "notify", string(notify.WhenViolation), "when to send chat notifications: violation, always or never")
 	fs.StringVar(&opts.TrivyResults, "trivy-results", "", "use an existing Trivy JSON report instead of running Trivy")
 	fs.StringVar(&opts.TrivyBin, "trivy", "trivy", "path to the trivy binary")

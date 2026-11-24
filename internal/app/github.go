@@ -12,9 +12,13 @@ import (
 
 // announce prints a one-line result and, in GitHub Actions, an annotation
 // that appears on the workflow run page.
-func announce(env Env, doc report.Document, outDir string) {
+func announce(env Env, doc report.Document, outDir, location string) {
+	where := outDir
+	if location != "" {
+		where = location
+	}
 	line := fmt.Sprintf("ScanProof %s: %s · %d policy violations · %s mode · report %s · evidence in %s",
-		doc.Verdict, doc.Image.Reference, doc.Summary.Violations, doc.Policy.Mode, doc.ReportID, outDir)
+		doc.Verdict, doc.Image.Reference, doc.Summary.Violations, doc.Policy.Mode, doc.ReportID, where)
 	fmt.Fprintln(env.Stdout, line)
 
 	if env.Getenv("GITHUB_ACTIONS") != "true" {
@@ -43,7 +47,7 @@ func writeGitHubStepSummary(env Env, path, summary string) {
 }
 
 // writeGitHubOutputs exposes the result to later workflow steps.
-func writeGitHubOutputs(env Env, doc report.Document, outDir string) {
+func writeGitHubOutputs(env Env, doc report.Document, outDir, location string) {
 	path := env.Getenv("GITHUB_OUTPUT")
 	if path == "" {
 		return
@@ -54,6 +58,9 @@ func writeGitHubOutputs(env Env, doc report.Document, outDir string) {
 		fmt.Sprintf("violations=%d", doc.Summary.Violations),
 		"results=" + filepath.Join(outDir, resultsFile),
 		"evidence-dir=" + outDir,
+	}
+	if location != "" {
+		lines = append(lines, "evidence-url="+location)
 	}
 	if err := appendFile(path, strings.Join(lines, "\n")+"\n"); err != nil {
 		fmt.Fprintf(env.Stderr, "scanproof: warning: could not write step outputs: %v\n", err)

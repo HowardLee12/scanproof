@@ -285,3 +285,103 @@ func TestDoubleDashEndsFlags(t *testing.T) {
 		t.Fatalf("a dash-leading image after -- must be rejected, got %d", code)
 	}
 }
+
+// fakeTrivy writes a script that answers `version`, `convert` and `image`.
+func fakeTrivy(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trivy")
+	abs, _ := filepath.Abs(fixture)
+	script := `#!/bin/sh
+case "$1" in
+  version) echo '{"Version":"0.76.2"}' ;;
+  convert)
+    out=""
+    while [ $# -gt 0 ]; do
+      if [ "$1" = "--output" ]; then out="$2"; fi
+      shift
+    done
+    echo '{"bomFormat":"CycloneDX"}' > "$out" ;;
+  *) cat '` + abs + `' ;;
+esac
+`
+	writeFile(t, path, script)
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestScanStoresEvidenceAndSBOM(t *testing.T) {
+	storeDir := t.TempDir()
+	outputs := filepath.Join(t.TempDir(), "outputs.txt")
+	h := newHarness()
+	h.env["GITHUB_ACTIONS"] = "true"
+	h.env["GITHUB_OUTPUT"] = outputs
+	code := h.run("scan", "--trivy", fakeTrivy(t), "--out", t.TempDir(), "--pdf=false",
+		"--store", "file://"+storeDir, "--", "alpine:3.18.0")
+	if code != 0 {
+		t.Fatalf("code %d: %s", code, h.stderr.String())
+	}
+
+	days, err := filepath.Glob(filepath.Join(storeDir, "scans", "2026", "11", "24", "SR-*"))
+	if err != nil || len(days) != 1 {
+		t.Fatalf("expected one stored scan, got %v %v", days, err)
+	}
+	for _, name := range []string{"results.json", "summary.md", "sbom.cdx.json", "manifest.json"} {
+		if _, err := os.Stat(filepath.Join(days[0], name)); err != nil {
+			t.Errorf("%s not stored: %v", name, err)
+		}
+	}
+	var doc map[string]any
+	readJSON(t, filepath.Join(days[0], "results.json"), &doc)
+	if doc["trigger"] != "ci" {
+		t.Errorf("trigger = %v", doc["trigger"])
+	}
+	if o := readFile(t, outputs); !strings.Contains(o, "evidence-url=file://") {
+		t.Errorf("outputs = %q", o)
+	}
+}
+
+func TestManualScanTrigger(t *testing.T) {
+	out := t.TempDir()
+	h := newHarness()
+	if code := h.run("scan", "--trivy-results", fixture, "--out", out, "--pdf=false", "--sbom=false"); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	var doc map[string]any
+	readJSON(t, filepath.Join(out, "results.json"), &doc)
+	if doc["trigger"] != "manual" {
+		t.Errorf("trigger = %v", doc["trigger"])
+	}
+	if _, err := os.Stat(filepath.Join(out, "sbom.cdx.json")); err == nil {
+		t.Error("--sbom=false must not write an SBOM")
+	}
+}
+
+func TestInvalidStoreFailsBeforeScanning(t *testing.T) {
+	h := newHarness()
+	code := h.run("scan", "--trivy-results", fixture, "--out", t.TempDir(), "--store", "ftp://nowhere/x")
+	if code != ExitError || !strings.Contains(h.stderr.String(), "unsupported store URL") {
+		t.Fatalf("code %d, stderr %q", code, h.stderr.String())
+	}
+}
+
+func TestStoreWriteFailureIsAnError(t *testing.T) {
+	storeDir := t.TempDir()
+	h := newHarness()
+	args := []string{"scan", "--trivy", fakeTrivy(t), "--pdf=false", "--sbom=false", "--store", "file://" + storeDir}
+	if code := h.run(append(args, "--out", t.TempDir(), "--", "alpine:3.18.0")...); code != 0 {
+		t.Fatalf("first run: %d %s", code, h.stderr.String())
+	}
+	// Make the day directory read-only so the next upload fails.
+	day := filepath.Join(storeDir, "scans", "2026", "11", "24")
+	if err := os.Chmod(day, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(day, 0o755) })
+	h = newHarness()
+	if code := h.run(append(args, "--out", t.TempDir(), "--", "alpine:3.18.0")...); code != ExitError {
+		t.Fatalf("an evidence upload failure must fail the step, got %d", code)
+	}
+}
