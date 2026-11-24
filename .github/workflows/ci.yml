@@ -85,6 +85,38 @@ jobs:
             scanproof:ci rescan --store file:///store --inventory file --images-file /out/dirs.txt --out /out/dir-rescan
           jq -e '.artifact_type == "directory" and .runtime.method == "sbom" and any(.vulnerabilities[]; .package == "urllib3")' \
             out/dir-rescan/*/results.json
+      - name: Every planted secret in a directory is reported or listed as not checked
+        # Checks the coverage model and the switched-off allow rules against
+        # the real Trivy: each file below holds a GitHub token. Files Trivy
+        # reads must be reported; the others must be listed in
+        # directory.coverage. The token is assembled here, so no
+        # token-shaped string is committed.
+        run: |
+          tok="ghp_$(printf 'S%.0s' $(seq 36))"
+          read_paths="app/settings.py pkg/tests/conftest.py examples/demo.py README.md pkg/locale/de/messages.po
+            pkg/vendor/lib.py vendor/top.py usr/share/doc/notes.txt usr/local/lib/python3.12/site.py trivy-secret.yaml"
+          unread_paths="src/plugin/.git/config dev/creds.txt web/node_modules/left-pad/index.js package-lock.json
+            go.sum model.bin archive.zip native.so"
+          for p in $read_paths $unread_paths; do
+            mkdir -p "planted/$(dirname "$p")"
+            printf 'token = "%s"\n' "$tok" > "planted/$p"
+          done
+          printf '\177ELF\002\001\001\000 token = "%s"\n' "$tok" > planted/native.so
+          printf 'ghp_x' > planted/tiny
+          docker run --rm -v "$PWD/planted:/scan/planted:ro" -v "$PWD/out:/out" \
+            scanproof:ci scan --dir --name planted --out /out/planted --pdf=false --sbom=false /scan/planted
+          r=out/planted/results.json
+          for p in $read_paths; do
+            jq -e --arg p "$p" 'any(.secrets[]; .target == $p)' "$r" > /dev/null || { echo "not reported: $p"; exit 1; }
+          done
+          for p in $unread_paths; do
+            jq -e --arg p "$p" 'any(.secrets[]; .target == $p) | not' "$r" > /dev/null || { echo "read after all: $p"; exit 1; }
+            jq -e --arg p "$p" '.directory.coverage | any(.secrets_not_checked.paths[]; .path == $p)
+              or any(.not_scanned.paths[]; .path as $root | $p == $root or ($p | startswith($root + "/")))' "$r" > /dev/null \
+              || { echo "not listed as not checked: $p"; exit 1; }
+          done
+          # Under 10 bytes is too small for any secret rule: neither read nor listed.
+          jq -e 'any(.secrets[]; .target == "tiny") or any(.directory.coverage.secrets_not_checked.paths[]; .path == "tiny") | not' "$r"
       - name: Build a period summary from the stored scan
         run: |
           today=$(date -u +%F)
