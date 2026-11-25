@@ -154,11 +154,20 @@ func uploadEvidence(ctx context.Context, st store.Store, outDir string, doc repo
 	if _, err := store.DigestIndexPrefix(doc.Image.Digest); err == nil && contains(names, sbomFile) {
 		entry := store.IndexEntry{ReportID: doc.ReportID, ScanPrefix: prefix, HasSBOM: true}
 		if err := store.PutIndexEntry(ctx, st, doc.Image.Digest, entry); err != nil {
-			return "", fmt.Errorf("report %s is stored but not indexed, so rescans will not find it (stored at %s): %w",
-				doc.ReportID, st.Location(prefix), err)
+			return "", notIndexed(ctx, err, doc.ReportID, st.Location(prefix))
 		}
 	}
 	return st.Location(prefix), nil
+}
+
+// notIndexed says that the evidence is stored even though its index entry
+// is not, also when the scan was stopped while it wrote the entry.
+func notIndexed(ctx context.Context, err error, reportID, location string) error {
+	if stop := stopped.Cause(ctx, err); stopped.Is(stop) {
+		stored := fmt.Sprintf("report %s is stored at %s but not indexed, so rescans will not find it", reportID, location)
+		return stopped.WithProgress(stopped.InPhase(stop, "while indexing the stored evidence"), stored)
+	}
+	return fmt.Errorf("report %s is stored but not indexed, so rescans will not find it (stored at %s): %w", reportID, location, err)
 }
 
 func contains(list []string, s string) bool {
