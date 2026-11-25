@@ -178,6 +178,9 @@ scanproof scan --dir --name NAME [--version VERSION] [flags] PATH
   --clamav-db DIR        ClamAV signature directory or file
   --clamav-update        run freshclam before the malware scan
   --malware-max-file-mb  skip larger files, listed in the report (default 512)
+  --malware-max-archive-files N
+                         most files ClamAV scans inside one archive (default 10000,
+                         ClamAV's own); see docs/malware.md#limits
   --platform OS/ARCH     image platform for multi-platform images (not with --dir)
   --notify WHEN          violation | always | never (default violation)
   --trivy-results FILE   use an existing Trivy JSON report (not with --dir)
