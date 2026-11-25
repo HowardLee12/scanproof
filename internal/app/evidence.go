@@ -111,7 +111,7 @@ func makeSBOM(ctx context.Context, opts scanOptions, env Env, raw []byte) ([]byt
 	if err == nil {
 		return sbom, nil
 	}
-	if isStop(err) {
+	if stopped.Is(err) {
 		return nil, err
 	}
 	if opts.Dir.Enabled && opts.Store != "" {
@@ -132,7 +132,7 @@ func writePDF(ctx context.Context, opts scanOptions, env Env, doc report.Documen
 		return false, nil
 	}
 	if err := renderer.Render(ctx, doc, resultsHash, filepath.Join(opts.OutDir, pdfFile)); err != nil {
-		if isStop(err) {
+		if stopped.Is(err) {
 			return false, err
 		}
 		fmt.Fprintf(env.Stderr, "scanproof: warning: %v; skipping %s\n", err, pdfFile)

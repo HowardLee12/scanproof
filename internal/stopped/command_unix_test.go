@@ -5,9 +5,7 @@ package stopped
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
-	"os/exec"
 	"testing"
 	"time"
 )
@@ -27,36 +25,35 @@ func TestCommandStopsTheChildAndWhatItStarted(t *testing.T) {
 	}
 }
 
-// exitError runs a shell command that fails and returns its error.
-func exitError(t *testing.T, script string) error {
-	t.Helper()
-	err := exec.Command("sh", "-c", script).Run()
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("%s: got %v", script, err)
+// Stopped blames the context only when it stopped the command: its Cancel
+// fired, or the command never started. How the child ended (an exit
+// status, a signal of its own) does not decide it, since exit codes differ
+// between platforms: on Windows a killed child exits with 1, which for
+// clamscan means "virus found".
+func TestStoppedOnlyWhenTheContextStoppedTheCommand(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	cmd := Command(ctx, "sleep", "10")
+	if err := cmd.Stopped(cmd.Run()); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("killed at the deadline: got %v", err)
 	}
-	return err
-}
-
-func TestKilledOnlyBlamesTheStopForAKill(t *testing.T) {
-	ended := func() context.Context {
+	for _, script := range []string{"exit 2", "kill -9 $$"} {
 		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		return ctx
+		cmd := Command(ctx, "sh", "-c", script)
+		err := cmd.Run()
+		cancel() // the context ends after the command failed by itself
+		if err == nil || cmd.Stopped(err) != nil {
+			t.Errorf("%s: a command that ended by itself failed by itself: %v", script, cmd.Stopped(err))
+		}
 	}
-	exited := exitError(t, "exit 2")
-	signalled := exitError(t, "kill -9 $$")
-	if Killed(ended(), exited) != nil {
-		t.Error("a command that exited with a status of its own failed by itself")
+	ended, cancelEnded := context.WithCancel(context.Background())
+	cancelEnded()
+	cmd = Command(ended, "sh", "-c", "exit 0")
+	if err := cmd.Stopped(cmd.Run()); !errors.Is(err, context.Canceled) {
+		t.Errorf("never started: got %v", err)
 	}
-	if !errors.Is(Killed(ended(), signalled), context.Canceled) {
-		t.Error("a command killed after the context ended was stopped")
-	}
-	if !errors.Is(Killed(ended(), fmt.Errorf("start: %w", errors.New("broken pipe"))), context.Canceled) {
-		t.Error("a command that did not run to completion after the context ended was stopped")
-	}
-	if Killed(context.Background(), signalled) != nil || Killed(ended(), nil) != nil {
-		t.Error("no stop without an ended context and an error")
+	if Command(ended, "true").Stopped(nil) != nil {
+		t.Error("no error, no stop")
 	}
 }
 

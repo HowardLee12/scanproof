@@ -220,7 +220,7 @@ func updateSignatures(ctx context.Context, m malwareOptions, env Env) error {
 	if err == nil {
 		return nil
 	}
-	if stop := stopped.Killed(ctx, err); stop != nil {
+	if stop := cmd.Stopped(err); stop != nil {
 		return stopped.InPhase(stop, "during the ClamAV signature update")
 	}
 	fmt.Fprintf(env.Stderr, "scanproof: warning: freshclam failed, using the existing signatures: %v: %s\n",

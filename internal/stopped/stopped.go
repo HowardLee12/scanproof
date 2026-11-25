@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"time"
 )
@@ -88,20 +87,10 @@ func WithProgress(err error, progress string) error {
 	return err
 }
 
-// Killed returns the stop when ctx has ended and err is how a command ends
-// when it is stopped: killed by a signal, or not run to completion. A
-// command that exited with a status of its own failed by itself, even if
-// the deadline passed a moment later.
-func Killed(ctx context.Context, err error) error {
-	stop := Check(ctx)
-	if stop == nil || err == nil {
-		return nil
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) && exitErr.ExitCode() != -1 {
-		return nil
-	}
-	return stop
+// Is reports whether err is a step that stopped because its context ended.
+func Is(err error) bool {
+	var s *Error
+	return errors.As(err, &s)
 }
 
 // Describe says, for people, that what (such as "the scan") stopped at its

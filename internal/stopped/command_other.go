@@ -4,5 +4,7 @@ package stopped
 
 import "os/exec"
 
-// killGroupOnCancel keeps exec.CommandContext's default: kill the child.
-func killGroupOnCancel(*exec.Cmd) {}
+// killFunc kills the child, as exec.CommandContext does by default.
+func killFunc(cmd *exec.Cmd) func() error {
+	return func() error { return cmd.Process.Kill() }
+}

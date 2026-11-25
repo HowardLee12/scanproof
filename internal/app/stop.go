@@ -1,7 +1,6 @@
 package app
 
 import (
-	"errors"
 	"time"
 
 	"github.com/HowardLee12/scanproof/internal/stopped"
@@ -25,11 +24,4 @@ func describeStop(err error, timeout time.Duration, what string) error {
 		return describedError{msg: msg, err: err}
 	}
 	return err
-}
-
-// isStop reports whether err is a step that stopped because the scan's
-// context ended.
-func isStop(err error) bool {
-	var s *stopped.Error
-	return errors.As(err, &s)
 }

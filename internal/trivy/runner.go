@@ -217,8 +217,8 @@ func (r Runner) run(ctx context.Context, phase string, args ...string) ([]byte, 
 	if err == nil {
 		return out, nil
 	}
-	if stop := stopped.Killed(ctx, err); stop != nil {
-		return nil, stopped.InPhase(stop, phase)
+	if stopped.Is(err) {
+		return nil, stopped.InPhase(err, phase)
 	}
 	if r.reachedOwnTimeout(start, err) {
 		return nil, &stopped.Error{Phase: phase, Err: fmt.Errorf("%w: %w", context.DeadlineExceeded, err)}
@@ -250,6 +250,9 @@ func defaultExec(ctx context.Context, name string, args ...string) ([]byte, erro
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if stop := cmd.Stopped(err); stop != nil {
+			return nil, stop
+		}
 		return nil, fmt.Errorf("%w: %s", err, tail(stderr.String(), maxStderr))
 	}
 	return stdout.Bytes(), nil

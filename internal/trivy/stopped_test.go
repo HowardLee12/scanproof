@@ -14,13 +14,14 @@ import (
 	"github.com/HowardLee12/scanproof/internal/stopped"
 )
 
-// waitForDeadline behaves like a Trivy that is killed when the context ends.
+// waitForDeadline behaves like a Trivy that is killed when the context
+// ends: defaultExec returns the stop for a command it stopped.
 func waitForDeadline(ctx context.Context, _ string, args ...string) ([]byte, error) {
 	if args[0] == "version" {
 		return []byte(`{"Version":"0.76.2"}`), nil
 	}
 	<-ctx.Done()
-	return nil, errors.New("signal: killed: ")
+	return nil, stopped.Check(ctx)
 }
 
 func shortContext(t *testing.T) context.Context {
