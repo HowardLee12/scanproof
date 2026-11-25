@@ -38,6 +38,20 @@ The exit code is 0 when every image and directory was rescanned and 2 when any o
 
 Build-time scans read exceptions from each repository. A rescan runs centrally, so it uses the one file given with `--exceptions`. Keep that file in a repository too, so changes to it are reviewed.
 
+Because one file covers every running image and directory, give each exception an `artifact` unless it really applies everywhere. Accepting a Go `stdlib` CVE in a vendor image should not accept it in your own images too:
+
+```yaml
+exceptions:
+  - id: EX-2026-011
+    finding: CVE-2025-22871
+    package: stdlib
+    artifact: cr.example.com/mirror/coredns/coredns
+    reason: Vendor image; the vendor ships the Go fix in its next release.
+    expires: 2027-01-31
+```
+
+Each rescanned image is matched by its running reference without tag or digest, and each directory by `dir:NAME`. See [Limiting an exception to some images](../README.md#limiting-an-exception-to-some-images) for lists and `*` prefixes.
+
 ## Kubernetes
 
 Run the rescan as a CronJob inside the cluster. It reads the pod list through the Kubernetes API with its own service account, so it needs no kubeconfig.

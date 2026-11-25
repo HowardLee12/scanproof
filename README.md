@@ -148,6 +148,31 @@ For a secret, give the secret rule ID and the file it is in. An exception for a 
 
 Every exception must have a reason and an expiry date. After it expires, the finding counts again and the report lists the exception as expired. Exceptions that match nothing are listed as unused, so stale ones are easy to clean up.
 
+### Limiting an exception to some images
+
+Without `artifact`, an exception applies to every image and directory the file is used with. That is fine for a repository's own file, but a central file, such as the one a [rescan](docs/rescan.md#exceptions-for-rescans) uses, often needs to accept a finding in one image only. `artifact` takes one name or a list:
+
+```yaml
+  - id: EX-2026-011
+    finding: CVE-2025-22871
+    package: stdlib
+    artifact: cr.example.com/mirror/coredns/coredns   # only this image
+    reason: Vendor image; the vendor ships the Go fix in its next release.
+    expires: 2027-01-31
+  - id: EX-2026-012
+    finding: CVE-2025-22871
+    package: stdlib
+    artifact: ["cr.example.com/mirror/*", "dir:acme-vllm"]
+    reason: Mirrored vendor images and the vLLM virtualenv; tracked upstream.
+    expires: 2027-01-31
+```
+
+- An image is named without tag or digest (`cr.example.com/mirror/coredns/coredns`, not `...:v1.11.1` or `...@sha256:…`), exactly as the reference it was scanned or found running under, so the exception covers every tag and digest of that image. ScanProof does not add a registry: an image scanned as `alpine:3.18.0` is `alpine`, not `docker.io/library/alpine`.
+- A directory is `dir:NAME`, as given with `--name`, without a version; the exception covers every version.
+- A name may end in `*` to match every name that starts with what comes before it: `cr.example.com/mirror/*` covers every image under that path, `dir:acme-*` every directory whose name starts with `acme-`. `*` is allowed only at the end, and a pattern for images never matches a directory, or the other way round.
+- An exception for other artifacts is left out of a report entirely: it neither accepts findings there nor shows up as unused. The report lists each exception's scope next to its finding.
+- A tag, a digest, a directory version, an empty name or a bare `*` is refused with an error that says what to change.
+
 ## Notifications
 
 Set either or both webhook URLs as secrets:
