@@ -204,7 +204,7 @@ func tiles(doc Document) []pdfTile {
 			accent = "#b42318"
 		}
 		out = append(out, pdfTile{Label: "Malware", Value: strconv.Itoa(doc.Summary.MalwareDetections),
-			Hint: fmt.Sprintf("%d files", doc.Malware.FilesScanned), Accent: accent})
+			Hint: plural(doc.Malware.FilesScanned, "file", "files"), Accent: accent})
 	}
 	out = append(out,
 		pdfTile{Label: "Violations", Value: strconv.Itoa(doc.Summary.Violations), Hint: string(doc.Policy.Mode) + " mode", Accent: verdictAccents[doc.Verdict]},

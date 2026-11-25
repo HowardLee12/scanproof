@@ -14,9 +14,9 @@ func malwareLimits(m *MalwareSection) string {
 		return ""
 	}
 	l := m.Limits
-	return fmt.Sprintf("Limits: files larger than %s are not scanned. ClamAV scans at most %s files and %s of data "+
+	return fmt.Sprintf("Limits: files larger than %s are not scanned. ClamAV scans at most %s and %s of data "+
 		"inside one file, such as an archive, and spends at most %s on it.",
-		limitSize(l.MaxFileBytes), stopped.Count(l.MaxArchiveFiles), limitSize(l.MaxScanBytes), limitTime(l.MaxScanTimeMS))
+		limitSize(l.MaxFileBytes), stopped.Plural(l.MaxArchiveFiles, "file", "files"), limitSize(l.MaxScanBytes), limitTime(l.MaxScanTimeMS))
 }
 
 // limitSize shows a size limit in MiB, the unit ClamAV and

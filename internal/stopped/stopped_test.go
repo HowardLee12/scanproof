@@ -117,3 +117,11 @@ func TestCount(t *testing.T) {
 		}
 	}
 }
+
+func TestPlural(t *testing.T) {
+	for n, want := range map[int]string{0: "0 files", 1: "1 file", 2: "2 files", 95150: "95,150 files"} {
+		if got := Plural(n, "file", "files"); got != want {
+			t.Errorf("Plural(%d) = %q, want %q", n, got, want)
+		}
+	}
+}

@@ -171,7 +171,7 @@ func DigestWith(ctx context.Context, root string, opts Options) (Result, error) 
 		sum := ""
 		if e.Type == File {
 			if sum, err = hashFile(ctx, r, e, opts.Content); err != nil {
-				return Result{}, stopped.WithProgress(err, stopped.Count(res.Files)+" of "+stopped.Count(files)+" files read")
+				return Result{}, stopped.WithProgress(err, stopped.Count(res.Files)+" of "+stopped.Plural(files, "file", "files")+" read")
 			}
 		}
 		h.Write(record(e, sum))

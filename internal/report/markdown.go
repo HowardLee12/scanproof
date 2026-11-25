@@ -149,7 +149,7 @@ func writeMalware(b *strings.Builder, m *MalwareSection, directory bool) {
 	if directory {
 		where = "of the directory"
 	}
-	fmt.Fprintf(b, "### Malware\n\nScanned %d files (%s) %s with %s. %s.\n\n", m.FilesScanned, formatBytes(m.BytesScanned),
+	fmt.Fprintf(b, "### Malware\n\nScanned %s (%s) %s with %s. %s.\n\n", plural(m.FilesScanned, "file", "files"), formatBytes(m.BytesScanned),
 		where, strings.Join(engines, " and "), plural(len(m.Findings), "detection", "detections"))
 	if limits := malwareLimits(m); limits != "" {
 		b.WriteString(limits + "\n\n")

@@ -129,6 +129,15 @@ func isContextError(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }
 
+// Plural writes n with thousands separators and the right form of the
+// noun: "1 file", "95,150 files".
+func Plural(n int, one, many string) string {
+	if n == 1 {
+		return Count(n) + " " + one
+	}
+	return Count(n) + " " + many
+}
+
 // Count writes n with thousands separators: 95150 is "95,150".
 func Count(n int) string {
 	s := strconv.Itoa(n)
