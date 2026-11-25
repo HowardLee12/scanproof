@@ -32,7 +32,7 @@ scanproof rescan --store s3://acme-scan-evidence/prod --inventory kubernetes,fil
 | `--notify` | `violation` | When to post the run summary: `violation`, `always`, `never` |
 | `--timeout` | `30m` | Time limit per image or directory |
 
-The exit code is 0 when every image and directory was rescanned and 2 when any of them failed, or when an inventory (or a line of the images file) could not be read. An inventory that fails does not stop the others: with `--inventory kubernetes,file`, the file is still rescanned when the Kubernetes API refuses access, and the failure is listed in the output and the chat message. Violations alone don't change the exit code: a rescan reports, it does not block anything.
+The exit code is 0 when every image and directory was rescanned and 2 when any of them failed, or when an inventory (or a line of the images file) could not be read. An inventory that fails does not stop the others: with `--inventory kubernetes,file`, the file is still rescanned when the Kubernetes API refuses access, and the failure is listed in the output and the chat message. Violations alone don't change the exit code: a rescan reports, it does not block anything. After `SIGINT` or `SIGTERM` the rescan stops, says once which images and directories it did not reach, and exits with 2.
 
 ### Exceptions for rescans
 
