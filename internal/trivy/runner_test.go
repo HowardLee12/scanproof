@@ -179,14 +179,17 @@ func TestSBOMConvertsTheRawReport(t *testing.T) {
 		out := args[indexOf(args, "--output")+1]
 		return nil, os.WriteFile(out, []byte(`{"bomFormat":"CycloneDX"}`), 0o600)
 	}
-	sbom, err := Runner{Bin: "trivy", exec: exec}.SBOM(context.Background(), []byte(`{"SchemaVersion":2}`))
+	sbom, err := Runner{Bin: "trivy", Timeout: 7 * time.Minute, exec: exec}.SBOM(context.Background(), []byte(`{"SchemaVersion":2}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(sbom) != `{"bomFormat":"CycloneDX"}` || string(gotInput) != `{"SchemaVersion":2}` {
 		t.Fatalf("sbom %s, input %s", sbom, gotInput)
 	}
-	if gotArgs[0] != "convert" || !strings.Contains(strings.Join(gotArgs, " "), "--format cyclonedx") {
+	// convert gets the scan's --timeout too, not Trivy's 5-minute default,
+	// and ignores settings files in the working directory.
+	if cmd := strings.Join(gotArgs, " "); gotArgs[0] != "convert" || !strings.Contains(cmd, "--format cyclonedx") ||
+		!strings.Contains(cmd, "--timeout 7m0s") || !strings.Contains(cmd, "--config "+os.DevNull) {
 		t.Errorf("args = %v", gotArgs)
 	}
 	if dir := filepath.Dir(gotArgs[len(gotArgs)-1]); dirExists(dir) {

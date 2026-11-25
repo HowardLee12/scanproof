@@ -123,17 +123,21 @@ func (r Runner) scanArtifact(ctx context.Context, mode, target string, extra []s
 // expiry date. Scans that look for secrets also pin --secret-config (see
 // scanArtifact); `trivy sbom` has no such flag.
 func (r Runner) hardenedFlags() []string {
-	timeout := r.Timeout
-	if timeout <= 0 {
-		timeout = defaultTimeout
-	}
 	return []string{
 		"--config", os.DevNull,
 		"--ignorefile", "",
 		"--severity", "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL",
 		"--ignore-unfixed=false",
-		"--timeout", timeout.String(),
+		"--timeout", r.timeout().String(),
 	}
+}
+
+// timeout is the --timeout Trivy gets.
+func (r Runner) timeout() time.Duration {
+	if r.Timeout <= 0 {
+		return defaultTimeout
+	}
+	return r.Timeout
 }
 
 // ScanSBOM checks a stored CycloneDX SBOM against today's vulnerability
@@ -197,7 +201,8 @@ func (r Runner) SBOM(ctx context.Context, raw []byte) ([]byte, error) {
 	if err := os.WriteFile(in, raw, 0o600); err != nil {
 		return nil, fmt.Errorf("write trivy report: %w", err)
 	}
-	if _, err := r.run(ctx, "during the SBOM conversion", "convert", "--format", "cyclonedx", "--output", out, in); err != nil {
+	args := []string{"convert", "--config", os.DevNull, "--timeout", r.timeout().String(), "--format", "cyclonedx", "--output", out, in}
+	if _, err := r.run(ctx, "during the SBOM conversion", args...); err != nil {
 		return nil, fmt.Errorf("convert trivy report to an SBOM: %w", err)
 	}
 	sbom, err := os.ReadFile(out)
@@ -230,8 +235,7 @@ func (r Runner) run(ctx context.Context, phase string, args ...string) ([]byte, 
 // "context deadline exceeded" and has run for at least that long. A
 // download that times out earlier is Trivy's own failure.
 func (r Runner) reachedOwnTimeout(start time.Time, err error) bool {
-	return r.Timeout > 0 && time.Since(start) >= r.Timeout &&
-		strings.Contains(err.Error(), "context deadline exceeded")
+	return time.Since(start) >= r.timeout() && strings.Contains(err.Error(), "context deadline exceeded")
 }
 
 func firstNonEmpty(values ...string) string {
