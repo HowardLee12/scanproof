@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/HowardLee12/scanproof/internal/model"
 )
 
 func oneException(artifact string) string {
@@ -17,9 +19,13 @@ func TestParseArtifactScope(t *testing.T) {
 		"cr.example.com/mirror/coredns/coredns":                              {"cr.example.com/mirror/coredns/coredns"},
 		"[example-api, dir:acme-vllm]":                                       {"example-api", "dir:acme-vllm"},
 		"\n      - cr.example.com/mirror/*\n      - localhost:5000/team/app": {"cr.example.com/mirror/*", "localhost:5000/team/app"},
-		`"dir:acme-*"`: {"dir:acme-*"},
-		`"dir:team/*"`: {"dir:team/*"},
-		`"dir:*"`:      {"dir:*"},
+		`"dir:acme-*"`:           {"dir:acme-*"},
+		`"dir:team/*"`:           {"dir:team/*"},
+		`"dir:*"`:                {"dir:*"},
+		`"localhost:5000/*"`:     {"localhost:5000/*"},
+		`"cr.example.com:443/*"`: {"cr.example.com:443/*"},
+		`"[::1]:5000/team/*"`:    {"[::1]:5000/team/*"},
+		`"alpine*"`:              {"alpine*"},
 	}
 	for in, want := range cases {
 		list, err := Parse([]byte(oneException(in)))
@@ -64,10 +70,18 @@ func TestParseRejectsBadArtifactScopes(t *testing.T) {
 		`"/app"`:                           "a name cannot have an empty part between slashes",
 		`"cr.example.com//app"`:            "a name cannot have an empty part between slashes",
 		`"cr.example.com//*"`:              "a name cannot have an empty part between slashes",
-		`"Cr.Example.com/App"`:             `artifact "Cr.Example.com/App": not an image name: repository can only contain`,
-		`"cr.example.com/App*"`:            "not an image name",
+		`"Cr.Example.com/App"`:             `artifact "Cr.Example.com/App": use lower case`,
+		`"cr.example.com/app~x"`:           `artifact "cr.example.com/app~x": not an image name: repository can only contain`,
+		`"cr.example.com/app~*"`:           "not an image name",
 		`"localhost:5000*"`:                `artifact "localhost:5000*": put / after a registry port, as in localhost:5000/*`,
 		"[[example-api]]":                  "artifact must be a name or a list of names",
+		// A * right after a registry would also match other registries.
+		`"cr.example.com*"`:     `artifact "cr.example.com*": a * right after a registry would also match other registries; end the registry with /, as in cr.example.com/*`,
+		`"docker.io*"`:          "end the registry with /, as in docker.io/*",
+		`"localhost*"`:          "end the registry with /, as in localhost/*",
+		`"cr.example.com:443*"`: "put / after a registry port, as in cr.example.com:443/*",
+		`"CR.EXAMPLE.COM/app"`:  `artifact "CR.EXAMPLE.COM/app": use lower case; image names are compared exactly`,
+		`"CR.EXAMPLE.COM/*"`:    "use lower case",
 	}
 	for in, want := range cases {
 		_, err := Parse([]byte(oneException(in)))
@@ -77,36 +91,44 @@ func TestParseRejectsBadArtifactScopes(t *testing.T) {
 	}
 }
 
+func image(name string) model.ArtifactID { return model.ArtifactID{Name: name} }
+func dir(name string) model.ArtifactID   { return model.ArtifactID{Directory: true, Name: name} }
+
 func TestAppliesTo(t *testing.T) {
 	cases := []struct {
 		scope    Artifacts
-		artifact string
+		artifact model.ArtifactID
 		want     bool
 	}{
-		{nil, "example-api", true},
-		{nil, "dir:acme-vllm", true},
-		{nil, "", true},
-		{Artifacts{"cr.example.com/mirror/coredns/coredns"}, "cr.example.com/mirror/coredns/coredns", true},
-		{Artifacts{"cr.example.com/mirror/coredns/coredns"}, "cr.example.com/mirror/coredns/coredns-extra", false},
-		{Artifacts{"cr.example.com/mirror/coredns/coredns"}, "example-api", false},
-		{Artifacts{"cr.example.com/mirror/coredns/coredns"}, "", false},
-		{Artifacts{"example-api", "dir:acme-vllm"}, "dir:acme-vllm", true},
-		{Artifacts{"example-api", "dir:acme-vllm"}, "example-api", true},
-		{Artifacts{"example-api", "dir:acme-vllm"}, "acme-vllm", false},
-		{Artifacts{"dir:acme-vllm"}, "dir:acme-vllm2", false},
-		{Artifacts{"cr.example.com/mirror/*"}, "cr.example.com/mirror/coredns/coredns", true},
-		{Artifacts{"cr.example.com/mirror/*"}, "cr.example.com/mirrors/coredns", false},
-		{Artifacts{"cr.example.com/mirror/*"}, "cr.example.com/mirror", false},
-		{Artifacts{"dir:acme-*"}, "dir:acme-vllm", true},
-		{Artifacts{"dir:acme-*"}, "acme-vllm", false},
-		// An image pattern never matches a directory, whatever its prefix.
-		{Artifacts{"d*"}, "docker.io/team/app", true},
-		{Artifacts{"d*"}, "dir:acme-vllm", false},
+		{nil, image("example-api"), true},
+		{nil, dir("acme-vllm"), true},
+		{nil, image(""), true},
+		{Artifacts{"cr.example.com/mirror/coredns/coredns"}, image("cr.example.com/mirror/coredns/coredns"), true},
+		{Artifacts{"cr.example.com/mirror/coredns/coredns"}, image("cr.example.com/mirror/coredns/coredns-extra"), false},
+		{Artifacts{"cr.example.com/mirror/coredns/coredns"}, image("example-api"), false},
+		{Artifacts{"cr.example.com/mirror/coredns/coredns"}, image(""), false},
+		{Artifacts{"example-api", "dir:acme-vllm"}, dir("acme-vllm"), true},
+		{Artifacts{"example-api", "dir:acme-vllm"}, image("example-api"), true},
+		{Artifacts{"example-api", "dir:acme-vllm"}, image("acme-vllm"), false},
+		{Artifacts{"dir:acme-vllm"}, dir("acme-vllm2"), false},
+		{Artifacts{"cr.example.com/mirror/*"}, image("cr.example.com/mirror/coredns/coredns"), true},
+		{Artifacts{"cr.example.com/mirror/*"}, image("cr.example.com/mirrors/coredns"), false},
+		{Artifacts{"cr.example.com/mirror/*"}, image("cr.example.com/mirror"), false},
+		{Artifacts{"dir:acme-*"}, dir("acme-vllm"), true},
+		{Artifacts{"dir:acme-*"}, image("acme-vllm"), false},
+		{Artifacts{"dir:*"}, dir("acme-vllm"), true},
+		// An image pattern never matches a directory, whatever its prefix,
+		// and the kind comes from the scan, not from the name: an image
+		// from a registry host named "dir" is still an image.
+		{Artifacts{"d*"}, image("docker.io/team/app"), true},
+		{Artifacts{"d*"}, dir("acme-vllm"), false},
+		{Artifacts{"dir:*"}, image("dir:5000/app"), false},
+		{Artifacts{"dir:5000/app"}, image("dir:5000/app"), false},
 	}
 	for _, c := range cases {
 		ex := Exception{ID: "EX-1", Artifact: c.scope}
 		if got := ex.AppliesTo(c.artifact); got != c.want {
-			t.Errorf("%q applies to %q = %v, want %v", c.scope, c.artifact, got, c.want)
+			t.Errorf("%q applies to %+v = %v, want %v", c.scope, c.artifact, got, c.want)
 		}
 	}
 }
@@ -140,5 +162,49 @@ func TestScopeDescription(t *testing.T) {
 	ex := Exception{Artifact: Artifacts{"cr.example.com/mirror/*", "dir:acme-vllm"}}
 	if got := ex.Scope(); got != "only in cr.example.com/mirror/*, dir:acme-vllm" {
 		t.Errorf("scoped: %q", got)
+	}
+}
+
+// YAML anchors, aliases and merge keys must not hide a null scope, which
+// would widen an exception to every artifact.
+func TestParseRejectsHiddenNullScopes(t *testing.T) {
+	cases := map[string]string{
+		"alias to null": `
+exceptions:
+  - id: EX-1
+    finding: CVE-1
+    approved_by: &n
+    artifact: *n
+    reason: r
+    expires: 2027-01-01
+`,
+		"merge key": `
+exceptions:
+  - id: EX-1
+    finding: CVE-1
+    <<: {artifact: null}
+    reason: r
+    expires: 2027-01-01
+`,
+		"alias in a list": `
+exceptions:
+  - id: EX-1
+    finding: CVE-1
+    approved_by: &n
+    artifact: [example-api, *n]
+    reason: r
+    expires: 2027-01-01
+`,
+	}
+	wants := map[string]string{
+		"alias to null":   "exception EX-1: artifact has no value",
+		"merge key":       "exception EX-1: merge keys (<<) are not supported; write the fields out",
+		"alias in a list": "a name cannot be empty",
+	}
+	for name, doc := range cases {
+		_, err := Parse([]byte(doc))
+		if err == nil || !strings.Contains(err.Error(), wants[name]) {
+			t.Errorf("%s: got %v, want %q", name, err, wants[name])
+		}
 	}
 }

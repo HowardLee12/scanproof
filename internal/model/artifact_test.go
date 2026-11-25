@@ -21,3 +21,20 @@ func TestArtifactName(t *testing.T) {
 		}
 	}
 }
+
+func TestArtifactID(t *testing.T) {
+	cases := []struct {
+		res  ScanResult
+		want ArtifactID
+	}{
+		{ScanResult{Image: Image{Reference: "cr.example.com/team/api:2.0"}}, ArtifactID{Name: "cr.example.com/team/api"}},
+		// The kind comes from the scan, not from the name.
+		{ScanResult{Image: Image{Reference: "dir:5000/app:1"}}, ArtifactID{Name: "dir:5000/app"}},
+		{ScanResult{ArtifactType: ArtifactDirectory, Image: Image{Reference: "dir:acme-vllm:0.9.1"}}, ArtifactID{Directory: true, Name: "acme-vllm"}},
+	}
+	for _, c := range cases {
+		if got := c.res.ArtifactID(); got != c.want {
+			t.Errorf("%q: got %+v, want %+v", c.res.Image.Reference, got, c.want)
+		}
+	}
+}

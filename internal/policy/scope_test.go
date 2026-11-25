@@ -121,3 +121,18 @@ func TestGlobalExceptionsStillApplyEverywhere(t *testing.T) {
 		t.Error("a global exception that matched nothing is still listed as unused")
 	}
 }
+
+// Whether an artifact is a directory comes from the scan, not from its
+// name: an image from a registry host named "dir" is not a directory.
+func TestADirScopeNeverMatchesAnImage(t *testing.T) {
+	excs := mustExceptions(t, `
+exceptions:
+  - {id: EX-D, finding: CVE-1, artifact: "dir:*", reason: r, expires: 2027-01-31}
+`)
+	if Evaluate(imageResult("dir:5000/app:1"), Default(), excs, now).Vulnerabilities[0].Accepted() {
+		t.Error("an image named dir:5000/app is still an image")
+	}
+	if !Evaluate(directoryResult("dir:acme-vllm:1"), Default(), excs, now).Vulnerabilities[0].Accepted() {
+		t.Error("dir:* covers every directory")
+	}
+}

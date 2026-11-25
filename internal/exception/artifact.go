@@ -30,7 +30,8 @@ func (a *Artifacts) UnmarshalYAML(node *yaml.Node) error {
 		return nil
 	case yaml.SequenceNode:
 		names := make(Artifacts, 0, len(node.Content))
-		for _, item := range node.Content {
+		for _, entry := range node.Content {
+			item := resolveAlias(entry)
 			if item.Kind != yaml.ScalarNode {
 				return shapeError(node)
 			}
@@ -51,33 +52,52 @@ func shapeError(node *yaml.Node) error {
 
 const nullTag = "!!null"
 
-// checkNullArtifacts refuses "artifact:" without a value. YAML decodes it
-// as if the key were missing, which would widen the exception to every
-// artifact instead of failing.
+// checkNullArtifacts refuses "artifact:" without a value, also through an
+// alias, and merge keys in an exception. YAML decodes a null artifact as if
+// the key were missing, which would widen the exception to every artifact
+// instead of failing.
 func checkNullArtifacts(data []byte) error {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil || len(doc.Content) == 0 {
 		return nil // the decoder reports syntax errors
 	}
-	list := mappingValue(doc.Content[0], "exceptions")
+	list := resolveAlias(mappingValue(resolveAlias(doc.Content[0]), "exceptions"))
 	if list == nil || list.Kind != yaml.SequenceNode {
 		return nil
 	}
-	for i, item := range list.Content {
-		if v := mappingValue(item, "artifact"); v != nil && v.Tag == nullTag {
-			where := fmt.Sprintf("exception %d", i+1)
-			if id := mappingValue(item, "id"); id != nil && id.Value != "" {
-				where = "exception " + id.Value
-			}
-			return fmt.Errorf("%s: artifact has no value; leave it out to apply the exception to every image and directory", where)
+	for i, entry := range list.Content {
+		if err := checkItem(resolveAlias(entry), i); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
+func checkItem(item *yaml.Node, index int) error {
+	where := fmt.Sprintf("exception %d", index+1)
+	if id := resolveAlias(mappingValue(item, "id")); id != nil && id.Value != "" {
+		where = "exception " + id.Value
+	}
+	if mappingValue(item, "<<") != nil {
+		return fmt.Errorf("%s: merge keys (<<) are not supported; write the fields out", where)
+	}
+	if v := resolveAlias(mappingValue(item, "artifact")); v != nil && v.Tag == nullTag {
+		return fmt.Errorf("%s: artifact has no value; leave it out to apply the exception to every image and directory", where)
+	}
+	return nil
+}
+
+// resolveAlias follows YAML aliases to the node they name.
+func resolveAlias(node *yaml.Node) *yaml.Node {
+	for node != nil && node.Kind == yaml.AliasNode {
+		node = node.Alias
+	}
+	return node
+}
+
 // mappingValue returns the value of key in a YAML mapping, or nil.
 func mappingValue(node *yaml.Node, key string) *yaml.Node {
-	if node.Kind != yaml.MappingNode {
+	if node == nil || node.Kind != yaml.MappingNode {
 		return nil
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
@@ -140,13 +160,8 @@ func validateDirectory(name, dir string, glob bool) error {
 // *, with go-containerregistry's rules for a repository, so a name that
 // could never match (upper case, an empty part) is refused.
 func validateImage(name, prefix string, glob bool) error {
-	switch {
-	case strings.Contains(prefix, "@"):
-		return fmt.Errorf("artifact %q: drop the digest; an exception applies to every tag and digest of an image", name)
-	case glob && registryPort.MatchString(prefix):
-		return fmt.Errorf("artifact %q: put / after a registry port, as in %s/*", name, prefix)
-	case model.ImageName(prefix) != prefix:
-		return fmt.Errorf("artifact %q: drop the tag; an exception applies to every tag and digest of an image", name)
+	if err := imageShape(name, prefix, glob); err != nil {
+		return err
 	}
 	path := prefix
 	if glob {
@@ -155,10 +170,36 @@ func validateImage(name, prefix string, glob bool) error {
 	if slices.Contains(strings.Split(path, "/"), "") {
 		return fmt.Errorf("artifact %q: a name cannot have an empty part between slashes", name)
 	}
-	if _, err := ggcrname.NewRepository(path + pick(glob, "x", "")); err != nil {
+	if _, err := ggcrname.NewRepository(prefix + pick(glob, "x", "")); err != nil {
 		return fmt.Errorf("artifact %q: not an image name: %w", name, err)
 	}
 	return nil
+}
+
+// imageShape refuses a digest, a tag, upper case, and a * that could match
+// past the end of a registry name (cr.example.com* also matches
+// cr.example.com.evil.io).
+func imageShape(name, prefix string, glob bool) error {
+	switch {
+	case strings.Contains(prefix, "@"):
+		return fmt.Errorf("artifact %q: drop the digest; an exception applies to every tag and digest of an image", name)
+	case prefix != strings.ToLower(prefix):
+		return fmt.Errorf("artifact %q: use lower case; image names are compared exactly", name)
+	case glob && registryPort.MatchString(prefix):
+		return fmt.Errorf("artifact %q: put / after a registry port, as in %s/*", name, prefix)
+	case glob && !strings.Contains(prefix, "/") && looksLikeRegistry(prefix):
+		return fmt.Errorf("artifact %q: a * right after a registry would also match other registries; "+
+			"end the registry with /, as in %s/*", name, prefix)
+	case model.ImageName(prefix) != prefix:
+		return fmt.Errorf("artifact %q: drop the tag; an exception applies to every tag and digest of an image", name)
+	}
+	return nil
+}
+
+// looksLikeRegistry is how image references tell a registry host from a
+// Docker Hub name: it has a dot or a port, or is localhost.
+func looksLikeRegistry(first string) bool {
+	return strings.ContainsAny(first, ".:") || first == "localhost"
 }
 
 // registryPort matches a registry host and port with nothing after it.
@@ -171,15 +212,14 @@ func pick(cond bool, yes, no string) string {
 	return no
 }
 
-// AppliesTo reports whether the exception covers findings in the artifact
-// with this name: an image name, or dir:NAME (see model.ScanResult's
-// ArtifactName). An exception without artifact applies everywhere.
-func (e Exception) AppliesTo(artifact string) bool {
+// AppliesTo reports whether the exception covers findings in the artifact.
+// An exception without artifact applies everywhere.
+func (e Exception) AppliesTo(a model.ArtifactID) bool {
 	if len(e.Artifact) == 0 {
 		return true
 	}
 	for _, pattern := range e.Artifact {
-		if matchesArtifact(pattern, artifact) {
+		if matchesArtifact(pattern, a) {
 			return true
 		}
 	}
@@ -187,16 +227,20 @@ func (e Exception) AppliesTo(artifact string) bool {
 }
 
 // matchesArtifact compares exactly, or by prefix when the pattern ends in
-// *. A pattern for images never matches a directory and the other way
-// round, whatever the prefix.
-func matchesArtifact(pattern, artifact string) bool {
-	if artifact == "" || strings.HasPrefix(pattern, directoryPrefix) != strings.HasPrefix(artifact, directoryPrefix) {
+// *. A dir: pattern only matches directories and any other pattern only
+// images, whatever the name looks like.
+func matchesArtifact(pattern string, a model.ArtifactID) bool {
+	target, isDir := strings.CutPrefix(pattern, directoryPrefix)
+	if !isDir {
+		target = pattern
+	}
+	if a.Name == "" || isDir != a.Directory {
 		return false
 	}
-	if prefix, glob := strings.CutSuffix(pattern, "*"); glob {
-		return strings.HasPrefix(artifact, prefix)
+	if prefix, glob := strings.CutSuffix(target, "*"); glob {
+		return strings.HasPrefix(a.Name, prefix)
 	}
-	return pattern == artifact
+	return target == a.Name
 }
 
 // Scope describes where the exception applies, for reports: "" when it

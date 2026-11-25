@@ -75,7 +75,7 @@ type Evaluation struct {
 // limited to other artifacts are left out entirely: they neither accept
 // findings nor count as unused. It does not modify its inputs.
 func Evaluate(res model.ScanResult, p Policy, excs []exception.Exception, now time.Time) Evaluation {
-	tracker := newExceptionTracker(inScope(excs, res.ArtifactName()), now)
+	tracker := newExceptionTracker(inScope(excs, res.ArtifactID()), now)
 
 	vulns := make([]VulnerabilityFinding, 0, len(res.Vulnerabilities))
 	vulnViolations := 0
@@ -179,7 +179,7 @@ type exceptionTracker struct {
 }
 
 // inScope returns the exceptions that apply to the named artifact.
-func inScope(list []exception.Exception, artifact string) []exception.Exception {
+func inScope(list []exception.Exception, artifact model.ArtifactID) []exception.Exception {
 	out := make([]exception.Exception, 0, len(list))
 	for _, ex := range list {
 		if ex.AppliesTo(artifact) {

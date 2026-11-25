@@ -143,7 +143,7 @@ func TestExampleExceptionsAreValid(t *testing.T) {
 	if err != nil || len(list) != 3 {
 		t.Fatalf("got %d exceptions, %v", len(list), err)
 	}
-	if !list[2].AppliesTo("cr.example.com/mirror/coredns/coredns") || list[2].AppliesTo("example-api") {
+	if !list[2].AppliesTo(model.ArtifactID{Name: "cr.example.com/mirror/coredns/coredns"}) || list[2].AppliesTo(model.ArtifactID{Name: "example-api"}) {
 		t.Errorf("the scoped example should apply to its image only: %+v", list[2])
 	}
 }
