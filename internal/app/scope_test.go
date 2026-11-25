@@ -39,7 +39,7 @@ func appliedIDs(doc map[string]any) string {
 }
 
 func TestScanAppliesOnlyExceptionsForTheScannedImage(t *testing.T) {
-	for artifact, want := range map[string]string{"alpine": "EX-1", "example-api": "violation", `"alpi*"`: "EX-1"} {
+	for artifact, want := range map[string]string{"alpine": "EX-1", "example-api": "violation", `"cr.example.com/*"`: "violation"} {
 		excs := filepath.Join(t.TempDir(), "exceptions.yaml")
 		writeFile(t, excs, "exceptions:\n  - {id: EX-1, finding: CVE-2022-48174, artifact: "+artifact+", reason: r, expires: 2027-02-28}\n")
 		out := t.TempDir()

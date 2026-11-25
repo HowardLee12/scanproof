@@ -25,7 +25,6 @@ func TestParseArtifactScope(t *testing.T) {
 		`"localhost:5000/*"`:     {"localhost:5000/*"},
 		`"cr.example.com:443/*"`: {"cr.example.com:443/*"},
 		`"[::1]:5000/team/*"`:    {"[::1]:5000/team/*"},
-		`"alpine*"`:              {"alpine*"},
 	}
 	for in, want := range cases {
 		list, err := Parse([]byte(oneException(in)))
@@ -73,15 +72,23 @@ func TestParseRejectsBadArtifactScopes(t *testing.T) {
 		`"Cr.Example.com/App"`:             `artifact "Cr.Example.com/App": use lower case`,
 		`"cr.example.com/app~x"`:           `artifact "cr.example.com/app~x": not an image name: repository can only contain`,
 		`"cr.example.com/app~*"`:           "not an image name",
-		`"localhost:5000*"`:                `artifact "localhost:5000*": put / after a registry port, as in localhost:5000/*`,
+		`"localhost:5000*"`:                `artifact "localhost:5000*": put the * after a /, as in localhost:5000/*; before the first / it could match other registries`,
 		"[[example-api]]":                  "artifact must be a name or a list of names",
 		// A * right after a registry would also match other registries.
-		`"cr.example.com*"`:     `artifact "cr.example.com*": a * right after a registry would also match other registries; end the registry with /, as in cr.example.com/*`,
-		`"docker.io*"`:          "end the registry with /, as in docker.io/*",
-		`"localhost*"`:          "end the registry with /, as in localhost/*",
-		`"cr.example.com:443*"`: "put / after a registry port, as in cr.example.com:443/*",
+		`"cr.example.com*"`:     `artifact "cr.example.com*": put the * after a /, as in cr.example.com/*; before the first / it could match other registries`,
+		`"docker.io*"`:          "put the * after a /, as in docker.io/*",
+		`"localhost*"`:          "put the * after a /",
+		`"cr.example.com:443*"`: "put the * after a /, as in cr.example.com:443/*",
 		`"CR.EXAMPLE.COM/app"`:  `artifact "CR.EXAMPLE.COM/app": use lower case; image names are compared exactly`,
 		`"CR.EXAMPLE.COM/*"`:    "use lower case",
+		// Globs without a / can match other registries too.
+		`"cr*"`:       "put the * after a /, as in cr/*",
+		`"localhos*"`: "put the * after a /",
+		`"alpine*"`:   "put the * after a /",
+		`"registry*"`: "put the * after a /",
+		// Look-alike characters: names must be ASCII.
+		"\"cr.ex\u0430mple.com/x\"": "use ASCII letters only",
+		"\"dir:\u0430cme\"":         "use ASCII letters only",
 	}
 	for in, want := range cases {
 		_, err := Parse([]byte(oneException(in)))
@@ -120,8 +127,8 @@ func TestAppliesTo(t *testing.T) {
 		// An image pattern never matches a directory, whatever its prefix,
 		// and the kind comes from the scan, not from the name: an image
 		// from a registry host named "dir" is still an image.
-		{Artifacts{"d*"}, image("docker.io/team/app"), true},
-		{Artifacts{"d*"}, dir("acme-vllm"), false},
+		{Artifacts{"docker.io/t*"}, image("docker.io/team/app"), true},
+		{Artifacts{"acme/*"}, dir("acme/vllm"), false},
 		{Artifacts{"dir:*"}, image("dir:5000/app"), false},
 		{Artifacts{"dir:5000/app"}, image("dir:5000/app"), false},
 	}

@@ -3,7 +3,6 @@ package exception
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -70,6 +69,9 @@ func validateArtifact(name string) error {
 		return errors.New("artifact: a name cannot be empty")
 	case strings.ContainsAny(name, " \t\n"):
 		return fmt.Errorf("artifact %q: a name cannot contain spaces", name)
+	case !isASCII(name):
+		// A look-alike letter (Cyrillic а for Latin a) would never match.
+		return fmt.Errorf("artifact %q: use ASCII letters only", name)
 	case glob && prefix == "":
 		return fmt.Errorf("artifact %q: a bare * would match everything; leave artifact out instead", name)
 	case strings.Contains(prefix, "*"):
@@ -117,34 +119,23 @@ func validateImage(name, prefix string, glob bool) error {
 	return nil
 }
 
-// imageShape refuses a digest, a tag, upper case, and a * that could match
-// past the end of a registry name (cr.example.com* also matches
-// cr.example.com.evil.io).
+// imageShape refuses a digest, a tag, upper case, and a * before the first
+// /, which could match past the end of a registry name (cr* also matches
+// cr.evil.io/x, alpine* also alpine.evil.io/x).
 func imageShape(name, prefix string, glob bool) error {
 	switch {
 	case strings.Contains(prefix, "@"):
 		return fmt.Errorf("artifact %q: drop the digest; an exception applies to every tag and digest of an image", name)
 	case prefix != strings.ToLower(prefix):
 		return fmt.Errorf("artifact %q: use lower case; image names are compared exactly", name)
-	case glob && registryPort.MatchString(prefix):
-		return fmt.Errorf("artifact %q: put / after a registry port, as in %s/*", name, prefix)
-	case glob && !strings.Contains(prefix, "/") && looksLikeRegistry(prefix):
-		return fmt.Errorf("artifact %q: a * right after a registry would also match other registries; "+
-			"end the registry with /, as in %s/*", name, prefix)
+	case glob && !strings.Contains(prefix, "/"):
+		return fmt.Errorf("artifact %q: put the * after a /, as in %s/*; before the first / it could match other registries",
+			name, prefix)
 	case model.ImageName(prefix) != prefix:
 		return fmt.Errorf("artifact %q: drop the tag; an exception applies to every tag and digest of an image", name)
 	}
 	return nil
 }
-
-// looksLikeRegistry is how image references tell a registry host from a
-// Docker Hub name: it has a dot or a port, or is localhost.
-func looksLikeRegistry(first string) bool {
-	return strings.ContainsAny(first, ".:") || first == "localhost"
-}
-
-// registryPort matches a registry host and port with nothing after it.
-var registryPort = regexp.MustCompile(`^[^/]+:[0-9]+$`)
 
 func pick(cond bool, yes, no string) string {
 	if cond {
@@ -191,4 +182,13 @@ func (e Exception) Scope() string {
 		return ""
 	}
 	return "only in " + strings.Join(e.Artifact, ", ")
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
 }
