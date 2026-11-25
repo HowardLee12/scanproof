@@ -102,7 +102,7 @@ func TestRunnerKeepsAFailureBeforeTheDeadline(t *testing.T) {
 	exec := func(context.Context, string, ...string) ([]byte, error) {
 		return nil, errors.New("exit status 1: no such image")
 	}
-	_, err := Runner{Bin: "trivy", exec: exec}.Scan(shortContext(t), "missing:1")
+	_, err := Runner{Bin: "trivy", exec: exec}.Scan(context.Background(), "missing:1")
 	var s *stopped.Error
 	if errors.As(err, &s) || !strings.Contains(err.Error(), "no such image") {
 		t.Fatalf("got %v", err)

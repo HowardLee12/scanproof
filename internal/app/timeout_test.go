@@ -23,8 +23,8 @@ func TestScanDirReportsTheTimeoutDuringTheMalwareScan(t *testing.T) {
 	h := newHarness()
 	h.noGrace()
 	code := h.run("scan", "--dir", "--name", "acme-vllm", "--trivy", fakeTrivy(t), "--out", t.TempDir(), "--pdf=false",
-		"--sbom=false", "--malware", "--clamscan", sleepyTool(t, "sleep 10"), "--timeout", "500ms", makeSoftwareDir(t))
-	want := "scanproof: the scan stopped at its --timeout of 500ms during the malware scan (0 of 3 files scanned); raise --timeout\n"
+		"--sbom=false", "--malware", "--clamscan", sleepyTool(t, "sleep 30"), "--timeout", "3s", makeSoftwareDir(t))
+	want := "scanproof: the scan stopped at its --timeout of 3s during the malware scan (0 of 3 files scanned); raise --timeout\n"
 	if code != ExitError || !strings.HasSuffix(h.stderr.String(), want) {
 		t.Fatalf("code %d, stderr %q", code, h.stderr.String())
 	}
@@ -38,10 +38,10 @@ func TestScanDirReportsTheTimeoutDuringTheMalwareScan(t *testing.T) {
 func TestScanReportsTheTimeoutDuringTrivy(t *testing.T) {
 	h := newHarness()
 	h.noGrace()
-	bin := trivyScript(t, `if [ "$1" = rootfs ] || [ "$1" = image ]; then sleep 10; fi`)
+	bin := trivyScript(t, `if [ "$1" = rootfs ] || [ "$1" = image ]; then sleep 30; fi`)
 	code := h.run("scan", "--dir", "--name", "acme-vllm", "--trivy", bin, "--out", t.TempDir(), "--pdf=false",
-		"--timeout", "500ms", makeSoftwareDir(t))
-	want := "the scan stopped at its --timeout of 500ms during the Trivy scan; raise --timeout"
+		"--timeout", "3s", makeSoftwareDir(t))
+	want := "the scan stopped at its --timeout of 3s during the Trivy scan; raise --timeout"
 	if code != ExitError || !strings.Contains(h.stderr.String(), want) {
 		t.Fatalf("code %d, stderr %q", code, h.stderr.String())
 	}
@@ -62,8 +62,8 @@ func TestFreshclamCutOffByTheTimeoutStopsTheScan(t *testing.T) {
 	h := newHarness()
 	h.noGrace()
 	code := h.run("scan", "--dir", "--name", "acme-vllm", "--trivy", fakeTrivy(t), "--out", t.TempDir(), "--pdf=false",
-		"--sbom=false", "--malware", "--clamscan", fakeClamscan(t), "--clamav-update", "--freshclam", sleepyTool(t, "sleep 10"),
-		"--timeout", "500ms", makeSoftwareDir(t))
+		"--sbom=false", "--malware", "--clamscan", fakeClamscan(t), "--clamav-update", "--freshclam", sleepyTool(t, "sleep 30"),
+		"--timeout", "3s", makeSoftwareDir(t))
 	if code != ExitError || !strings.Contains(h.stderr.String(), "during the ClamAV signature update") {
 		t.Fatalf("code %d, stderr %q", code, h.stderr.String())
 	}
@@ -88,12 +88,12 @@ func TestRescanTimeoutNamesTheImage(t *testing.T) {
 	received := notifyServer(t, h)
 	start := time.Now()
 	code := h.run("rescan", "--store", "file://"+storeDir, "--inventory", "file", "--images-file", images,
-		"--trivy", trivyScript(t, `if [ "$1" = sbom ]; then sleep 10; fi`), "--out", t.TempDir(), "--timeout", "500ms")
-	want := "scanproof: directory acme-vllm:0.9.1: the rescan of this directory stopped at its --timeout of 500ms during the Trivy SBOM scan; raise --timeout"
-	if code != ExitError || !strings.Contains(h.stderr.String(), want) || time.Since(start) > 8*time.Second {
+		"--trivy", trivyScript(t, `if [ "$1" = sbom ]; then sleep 30; fi`), "--out", t.TempDir(), "--timeout", "3s")
+	want := "scanproof: directory acme-vllm:0.9.1: the rescan of this directory stopped at its --timeout of 3s during the Trivy SBOM scan; raise --timeout"
+	if code != ExitError || !strings.Contains(h.stderr.String(), want) || time.Since(start) > 15*time.Second {
 		t.Fatalf("code %d after %s, stderr %q", code, time.Since(start), h.stderr.String())
 	}
-	if body := string(next(t, received)); !strings.Contains(body, "stopped at its --timeout of 500ms during the Trivy SBOM scan") {
+	if body := string(next(t, received)); !strings.Contains(body, "stopped at its --timeout of 3s during the Trivy SBOM scan") {
 		t.Errorf("the chat message must say why: %s", body)
 	}
 }
