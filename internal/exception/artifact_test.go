@@ -165,11 +165,39 @@ func TestScopeDescription(t *testing.T) {
 	}
 }
 
-// YAML anchors, aliases and merge keys must not hide a null scope, which
-// would widen an exception to every artifact.
-func TestParseRejectsHiddenNullScopes(t *testing.T) {
-	cases := map[string]string{
-		"alias to null": `
+// An exceptions file must say what it means where it says it: YAML
+// anchors, aliases and merge keys can bring in a key or a value from
+// elsewhere, and a null artifact decodes as if the key were missing, which
+// would widen an exception to every artifact. They are refused anywhere.
+func TestParseRefusesYAMLIndirection(t *testing.T) {
+	cases := map[string]struct{ doc, want string }{
+		"alias as the artifact key": {`
+exceptions:
+  - id: SCOPED
+    finding: CVE-1
+    reason: r
+    expires: 2099-01-01
+    &k artifact: cr.example.com/team/api
+  - id: LOOKS-SCOPED
+    finding: CVE-2022-48174
+    reason: accepted for cr.example.com/team/api only
+    expires: 2099-01-01
+    *k :
+`, "line 7: YAML anchors (&k) are not supported in an exceptions file; write the value out"},
+		"merge key around the whole file": {`
+<<:
+  exceptions:
+    - {id: EX-1, finding: CVE-1, reason: r, expires: 2027-01-01, artifact: }
+`, "line 2: merge keys (<<) are not supported in an exceptions file; write the fields out"},
+		"merge key in an exception": {`
+exceptions:
+  - id: EX-1
+    finding: CVE-1
+    <<: {artifact: ~}
+    reason: r
+    expires: 2027-01-01
+`, "line 5: merge keys (<<) are not supported"},
+		"alias to a null value": {`
 exceptions:
   - id: EX-1
     finding: CVE-1
@@ -177,34 +205,44 @@ exceptions:
     artifact: *n
     reason: r
     expires: 2027-01-01
-`,
-		"merge key": `
+`, "line 5: YAML anchors (&n) are not supported"},
+		"alias in a list": {`
 exceptions:
   - id: EX-1
     finding: CVE-1
-    <<: {artifact: null}
+    artifact: [&a example-api, *a]
     reason: r
     expires: 2027-01-01
-`,
-		"alias in a list": `
+`, "YAML anchors (&a) are not supported"},
+		"anchor on an exception": {`
+exceptions:
+  - &base {id: EX-1, finding: CVE-1, reason: r, expires: 2027-01-01}
+`, "line 3: YAML anchors (&base) are not supported"},
+		"anchor on the list": {`
+exceptions: &all
+  - {id: EX-1, finding: CVE-1, reason: r, expires: 2027-01-01}
+`, "line 2: YAML anchors (&all) are not supported"},
+		"quoted merge key": {`
+exceptions:
+  - {id: EX-1, finding: CVE-1, reason: r, expires: 2027-01-01, "<<": {artifact: ~}}
+`, "merge keys (<<) are not supported"},
+		"artifact without a value": {`
 exceptions:
   - id: EX-1
     finding: CVE-1
-    approved_by: &n
-    artifact: [example-api, *n]
+    artifact:
     reason: r
     expires: 2027-01-01
-`,
+`, "exception EX-1: artifact has no value"},
+		"artifact tagged null": {`
+exceptions:
+  - {id: EX-1, finding: CVE-1, artifact: !!null x, reason: r, expires: 2027-01-01}
+`, "exception EX-1: artifact has no value"},
 	}
-	wants := map[string]string{
-		"alias to null":   "exception EX-1: artifact has no value",
-		"merge key":       "exception EX-1: merge keys (<<) are not supported; write the fields out",
-		"alias in a list": "a name cannot be empty",
-	}
-	for name, doc := range cases {
-		_, err := Parse([]byte(doc))
-		if err == nil || !strings.Contains(err.Error(), wants[name]) {
-			t.Errorf("%s: got %v, want %q", name, err, wants[name])
+	for name, c := range cases {
+		_, err := Parse([]byte(c.doc))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want %q", name, err, c.want)
 		}
 	}
 }

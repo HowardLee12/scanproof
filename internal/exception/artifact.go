@@ -30,8 +30,7 @@ func (a *Artifacts) UnmarshalYAML(node *yaml.Node) error {
 		return nil
 	case yaml.SequenceNode:
 		names := make(Artifacts, 0, len(node.Content))
-		for _, entry := range node.Content {
-			item := resolveAlias(entry)
+		for _, item := range node.Content {
 			if item.Kind != yaml.ScalarNode {
 				return shapeError(node)
 			}
@@ -48,64 +47,6 @@ func (a *Artifacts) UnmarshalYAML(node *yaml.Node) error {
 
 func shapeError(node *yaml.Node) error {
 	return fmt.Errorf("line %d: artifact must be a name or a list of names", node.Line)
-}
-
-const nullTag = "!!null"
-
-// checkNullArtifacts refuses "artifact:" without a value, also through an
-// alias, and merge keys in an exception. YAML decodes a null artifact as if
-// the key were missing, which would widen the exception to every artifact
-// instead of failing.
-func checkNullArtifacts(data []byte) error {
-	var doc yaml.Node
-	if err := yaml.Unmarshal(data, &doc); err != nil || len(doc.Content) == 0 {
-		return nil // the decoder reports syntax errors
-	}
-	list := resolveAlias(mappingValue(resolveAlias(doc.Content[0]), "exceptions"))
-	if list == nil || list.Kind != yaml.SequenceNode {
-		return nil
-	}
-	for i, entry := range list.Content {
-		if err := checkItem(resolveAlias(entry), i); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func checkItem(item *yaml.Node, index int) error {
-	where := fmt.Sprintf("exception %d", index+1)
-	if id := resolveAlias(mappingValue(item, "id")); id != nil && id.Value != "" {
-		where = "exception " + id.Value
-	}
-	if mappingValue(item, "<<") != nil {
-		return fmt.Errorf("%s: merge keys (<<) are not supported; write the fields out", where)
-	}
-	if v := resolveAlias(mappingValue(item, "artifact")); v != nil && v.Tag == nullTag {
-		return fmt.Errorf("%s: artifact has no value; leave it out to apply the exception to every image and directory", where)
-	}
-	return nil
-}
-
-// resolveAlias follows YAML aliases to the node they name.
-func resolveAlias(node *yaml.Node) *yaml.Node {
-	for node != nil && node.Kind == yaml.AliasNode {
-		node = node.Alias
-	}
-	return node
-}
-
-// mappingValue returns the value of key in a YAML mapping, or nil.
-func mappingValue(node *yaml.Node, key string) *yaml.Node {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return nil
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if node.Content[i].Value == key {
-			return node.Content[i+1]
-		}
-	}
-	return nil
 }
 
 // validate checks every name. A nil list (no artifact key) is fine; an

@@ -108,14 +108,14 @@ func Load(path string) ([]Exception, Source, error) {
 // Parse decodes and validates exceptions. Unknown keys are rejected so that a
 // typo such as "expire:" cannot silently create an exception that never ends.
 func Parse(data []byte) ([]Exception, error) {
+	if err := checkStructure(data); err != nil {
+		return nil, err
+	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var f file
 	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse exceptions: %w", err)
-	}
-	if err := checkNullArtifacts(data); err != nil {
-		return nil, err
 	}
 	if err := validate(f.Exceptions); err != nil {
 		return nil, err

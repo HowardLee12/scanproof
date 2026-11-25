@@ -191,3 +191,35 @@ func TestResultsNameTheExceptionsFile(t *testing.T) {
 		t.Fatalf("exceptions = %v", e)
 	}
 }
+
+// The two files a review used to widen a scoped exception to every image:
+// an alias as the artifact key, and a merge key around the whole file.
+func TestScanRefusesExceptionsFilesThatHideTheirScope(t *testing.T) {
+	files := map[string]string{
+		"alias key": `exceptions:
+  - id: SCOPED
+    finding: CVE-2000-0001
+    reason: r
+    expires: 2099-01-01
+    &k artifact: cr.example.com/team/api
+  - id: LOOKS-SCOPED
+    finding: CVE-2022-48174
+    reason: accepted for cr.example.com/team/api only
+    expires: 2099-01-01
+    *k :
+`,
+		"merge key": `<<:
+  exceptions:
+    - {id: EX-1, finding: CVE-2022-48174, reason: r, expires: 2099-01-01, artifact: }
+`,
+	}
+	for name, content := range files {
+		excs := filepath.Join(t.TempDir(), "exceptions.yaml")
+		writeFile(t, excs, content)
+		h := newHarness()
+		code := h.run("scan", "--trivy-results", fixture, "--exceptions", excs, "--out", t.TempDir(), "--pdf=false")
+		if code != ExitError || !strings.Contains(h.stderr.String(), "are not supported in an exceptions file") {
+			t.Errorf("%s: code %d, stderr %q", name, code, h.stderr.String())
+		}
+	}
+}
