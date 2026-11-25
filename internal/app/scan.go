@@ -80,7 +80,7 @@ func scanAndStore(ctx context.Context, opts scanOptions, env Env) (scanned, erro
 	defer cancel()
 	scan, err := scanTarget(scanCtx, opts, env)
 	if err != nil {
-		return scanned{}, err
+		return scanned{}, stopped.Cause(scanCtx, err)
 	}
 	ci := cicontext.FromEnv(env.Getenv)
 	doc, err := buildDocument(env, setup, scan.Result, scanTrigger(ci), ci, nil)
@@ -89,10 +89,10 @@ func scanAndStore(ctx context.Context, opts scanOptions, env Env) (scanned, erro
 	}
 	written, err := writeEvidence(ctx, opts, env, doc, scan.Raw)
 	if err != nil || st == nil {
-		return scanned{doc: doc}, err
+		return scanned{doc: doc}, stopped.Cause(ctx, err)
 	}
 	location, err := uploadEvidence(ctx, st, opts.OutDir, doc, written)
-	return scanned{doc: doc, location: location, indexed: contains(written, sbomFile)}, err
+	return scanned{doc: doc, location: location, indexed: contains(written, sbomFile)}, stopped.Cause(ctx, err)
 }
 
 func scanTrigger(ci cicontext.Context) string {
@@ -220,7 +220,7 @@ func updateSignatures(ctx context.Context, m malwareOptions, env Env) error {
 	if err == nil {
 		return nil
 	}
-	if stop := stopped.Check(ctx); stop != nil {
+	if stop := stopped.Killed(ctx, err); stop != nil {
 		return stopped.InPhase(stop, "the ClamAV signature update")
 	}
 	fmt.Fprintf(env.Stderr, "scanproof: warning: freshclam failed, using the existing signatures: %v: %s\n",

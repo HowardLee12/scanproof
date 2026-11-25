@@ -11,6 +11,7 @@ import (
 	"github.com/HowardLee12/scanproof/internal/inventory"
 	"github.com/HowardLee12/scanproof/internal/model"
 	"github.com/HowardLee12/scanproof/internal/report"
+	"github.com/HowardLee12/scanproof/internal/stopped"
 	"github.com/HowardLee12/scanproof/internal/store"
 	"github.com/HowardLee12/scanproof/internal/trivy"
 )
@@ -66,7 +67,7 @@ func rescanOne(ctx context.Context, opts rescanOptions, env Env, st store.Store,
 	defer cancel()
 	scan, rt, err := rescanScan(ctx, opts, env, st, img)
 	if err != nil {
-		return report.Document{}, err
+		return report.Document{}, stopped.Cause(ctx, err)
 	}
 	doc, err := buildDocument(env, setup, rescanResult(scan.Result, img), report.TriggerRescan, cicontext.Context{}, rt)
 	if err != nil {
@@ -79,10 +80,10 @@ func rescanOne(ctx context.Context, opts rescanOptions, env Env, st store.Store,
 	quiet := Env{Getenv: func(string) string { return "" }, Stdout: io.Discard, Stderr: env.Stderr, Now: env.Now}
 	written, err := writeEvidence(ctx, perImage, quiet, doc, scan.Raw)
 	if err != nil {
-		return report.Document{}, err
+		return report.Document{}, stopped.Cause(ctx, err)
 	}
 	if _, err := uploadEvidence(ctx, st, perImage.OutDir, doc, written); err != nil {
-		return report.Document{}, err
+		return report.Document{}, stopped.Cause(ctx, err)
 	}
 	return doc, nil
 }

@@ -41,9 +41,11 @@ func TestInPhaseNamesTheInnermostStepOnly(t *testing.T) {
 	if InPhase(plain, "the malware scan") != plain {
 		t.Error("other errors pass unchanged")
 	}
-	bare := fmt.Errorf("upload: %w", context.DeadlineExceeded)
-	if !errors.As(InPhase(bare, "storing the evidence"), &s) || s.Phase != "storing the evidence" {
-		t.Errorf("a bare context error gets a phase too: %+v", s)
+	// A timeout inside a step (an SDK's own credential lookup, an HTTP
+	// client's Timeout) is not the scan's deadline: only Check makes a stop.
+	inner := fmt.Errorf("upload: get credentials: %w", context.DeadlineExceeded)
+	if InPhase(inner, "storing the evidence") != inner {
+		t.Error("a wrapped context error that Check did not make passes unchanged")
 	}
 }
 
@@ -74,6 +76,32 @@ func TestDescribe(t *testing.T) {
 	}
 	if _, ok := Describe(errors.New("boom"), time.Minute, "the scan"); ok {
 		t.Error("other errors are not described")
+	}
+	inner := fmt.Errorf("operation error ec2imds: GetMetadata: %w", context.DeadlineExceeded)
+	if _, ok := Describe(inner, time.Minute, "the scan"); ok {
+		t.Error("a timeout inside a step, while the scan's deadline has not passed, is not a stop")
+	}
+}
+
+func TestCause(t *testing.T) {
+	inner := fmt.Errorf("get credentials: %w", context.DeadlineExceeded)
+	if Cause(context.Background(), inner) != inner {
+		t.Error("while the scan's context is live, an error is what it says")
+	}
+	if Cause(expired(t), errors.New("clamscan exited with 2")).Error() != "clamscan exited with 2" {
+		t.Error("an error that is not about a context is kept even after the deadline")
+	}
+	var s *Error
+	if err := Cause(expired(t), fmt.Errorf("list: %w", context.DeadlineExceeded)); !errors.As(err, &s) ||
+		!errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("a context error after the scan's deadline passed is the stop: %v", err)
+	}
+	named := InPhase(Check(expired(t)), "the malware scan")
+	if Cause(expired(t), named) != named {
+		t.Error("a stop is kept as it is")
+	}
+	if Cause(context.Background(), nil) != nil {
+		t.Error("no error, no cause")
 	}
 }
 

@@ -3,7 +3,9 @@ package trivy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -48,15 +50,51 @@ func TestRunnerReportsTheDeadlineAndThePhase(t *testing.T) {
 	}
 }
 
+const trivyTimeoutText = "exit status 1: FATAL run error: rootfs scan error: scan failed: failed analysis: " +
+	"analyze file (config/settings.ini): semaphore acquire: context deadline exceeded"
+
 func TestRunnerReportsTrivysOwnTimeout(t *testing.T) {
 	exec := func(context.Context, string, ...string) ([]byte, error) {
-		return nil, errors.New("exit status 1: FATAL run error: rootfs scan error: scan failed: failed analysis: " +
-			"analyze file (config/settings.ini): semaphore acquire: context deadline exceeded")
+		time.Sleep(60 * time.Millisecond) // past the runner's 50ms --timeout
+		return nil, errors.New(trivyTimeoutText)
 	}
-	_, err := Runner{Bin: "trivy", exec: exec}.ScanRootfs(context.Background(), "/srv/app")
+	_, err := Runner{Bin: "trivy", Timeout: 50 * time.Millisecond, exec: exec}.ScanRootfs(context.Background(), "/srv/app")
 	msg, ok := stopped.Describe(err, 30*time.Minute, "the scan")
 	if !ok || !strings.Contains(msg, "during the Trivy scan") || strings.Contains(msg, "settings.ini") {
 		t.Fatalf("Trivy reaching its own --timeout is a timeout, not a problem with one file: %q (%v)", msg, err)
+	}
+	if !strings.Contains(err.Error(), "settings.ini") || !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Trivy's own message stays the cause: %v", err)
+	}
+}
+
+// A registry or database download that times out long before --timeout is
+// Trivy's own failure, and its message must not be lost.
+func TestRunnerKeepsAnEarlierTimeoutAsTrivysError(t *testing.T) {
+	exec := func(context.Context, string, ...string) ([]byte, error) {
+		return nil, errors.New("exit status 1: FATAL init error: DB error: failed to download vulnerability DB: " +
+			`Get "https://mirror.gcr.io/v2/": context deadline exceeded`)
+	}
+	_, err := Runner{Bin: "trivy", Timeout: 30 * time.Minute, exec: exec}.Scan(context.Background(), "alpine:3.18.0")
+	var s *stopped.Error
+	if errors.As(err, &s) || !strings.Contains(err.Error(), "failed to download vulnerability DB") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// Trivy exiting with a status of its own just as the deadline passes failed
+// by itself.
+func TestRunnerKeepsAnExitAfterTheDeadline(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	exitErr := osexec.Command("sh", "-c", "exit 1").Run()
+	exec := func(context.Context, string, ...string) ([]byte, error) {
+		return nil, fmt.Errorf("%w: unknown flag --bogus", exitErr)
+	}
+	_, err := Runner{Bin: "trivy", exec: exec}.Scan(ctx, "alpine:3.18.0")
+	var s *stopped.Error
+	if errors.As(err, &s) || !strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("got %v", err)
 	}
 }
 

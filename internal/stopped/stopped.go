@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strconv"
 	"time"
 )
@@ -47,15 +48,29 @@ func Check(ctx context.Context) error {
 	return nil
 }
 
-// InPhase names the step of a stopped error that has no step yet, and turns
-// a bare context error into one. Other errors pass unchanged.
+// Cause returns the stop when ctx has ended and err is a context error that
+// is not one yet, for example a store listing cut off by the scan's
+// deadline. Anything else passes unchanged: while ctx is live, a timeout
+// inside a step (an SDK's credential lookup, an HTTP client's Timeout) is
+// that step's own failure, and an error that is not about a context is
+// kept even after the deadline.
+func Cause(ctx context.Context, err error) error {
+	var s *Error
+	if err == nil || errors.As(err, &s) || !isContextError(err) {
+		return err
+	}
+	if stop := Check(ctx); stop != nil {
+		return stop
+	}
+	return err
+}
+
+// InPhase names the step of a stopped error that has no step yet. Other
+// errors pass unchanged: only Check makes a stop.
 func InPhase(err error, phase string) error {
 	var s *Error
-	switch {
-	case errors.As(err, &s) && s.Phase == "":
+	if errors.As(err, &s) && s.Phase == "" {
 		return &Error{Phase: phase, Progress: s.Progress, Err: s.Err}
-	case s == nil && isContextError(err):
-		return &Error{Phase: phase, Err: contextError(err)}
 	}
 	return err
 }
@@ -72,16 +87,29 @@ func WithProgress(err error, progress string) error {
 	return err
 }
 
+// Killed returns the stop when ctx has ended and err is how a command ends
+// when it is stopped: killed by a signal, or not run to completion. A
+// command that exited with a status of its own failed by itself, even if
+// the deadline passed a moment later.
+func Killed(ctx context.Context, err error) error {
+	stop := Check(ctx)
+	if stop == nil || err == nil {
+		return nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() != -1 {
+		return nil
+	}
+	return stop
+}
+
 // Describe says, for people, that what (such as "the scan") stopped at its
 // --timeout or was cancelled, where it was and how far it got. ok is false
 // when err is not about the context ending.
 func Describe(err error, timeout time.Duration, what string) (msg string, ok bool) {
 	var s *Error
 	if !errors.As(err, &s) {
-		if !isContextError(err) {
-			return "", false
-		}
-		s = &Error{Err: contextError(err)}
+		return "", false
 	}
 	where := ""
 	if s.Phase != "" {
@@ -98,13 +126,6 @@ func Describe(err error, timeout time.Duration, what string) (msg string, ok boo
 
 func isContextError(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
-}
-
-func contextError(err error) error {
-	if errors.Is(err, context.Canceled) {
-		return context.Canceled
-	}
-	return context.DeadlineExceeded
 }
 
 // Count writes n with thousands separators: 95150 is "95,150".

@@ -207,22 +207,31 @@ func (r Runner) SBOM(ctx context.Context, raw []byte) ([]byte, error) {
 	return sbom, nil
 }
 
-// run runs Trivy for one step. If the step fails because the scan's
-// context ended, or because Trivy reached its own --timeout (it then names
-// whatever file it was reading), the error says so and names the step,
-// instead of blaming the exit status or that file.
+// run runs Trivy for one step. If Trivy was killed because the scan's
+// context ended, or reached its own --timeout (it then names whatever file
+// it was reading), the error says so and names the step, instead of
+// blaming the exit status or that file. Trivy's message stays the cause.
 func (r Runner) run(ctx context.Context, phase string, args ...string) ([]byte, error) {
+	start := time.Now()
 	out, err := r.exec(ctx, r.Bin, args...)
 	if err == nil {
 		return out, nil
 	}
-	if stop := stopped.Check(ctx); stop != nil {
+	if stop := stopped.Killed(ctx, err); stop != nil {
 		return nil, stopped.InPhase(stop, phase)
 	}
-	if strings.Contains(err.Error(), "context deadline exceeded") {
-		return nil, &stopped.Error{Phase: phase, Err: context.DeadlineExceeded}
+	if r.reachedOwnTimeout(start, err) {
+		return nil, &stopped.Error{Phase: phase, Err: fmt.Errorf("%w: %w", context.DeadlineExceeded, err)}
 	}
 	return nil, err
+}
+
+// reachedOwnTimeout reports whether Trivy stopped at its --timeout: it says
+// "context deadline exceeded" and has run for at least that long. A
+// download that times out earlier is Trivy's own failure.
+func (r Runner) reachedOwnTimeout(start time.Time, err error) bool {
+	return r.Timeout > 0 && time.Since(start) >= r.Timeout &&
+		strings.Contains(err.Error(), "context deadline exceeded")
 }
 
 func firstNonEmpty(values ...string) string {

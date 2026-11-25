@@ -5,6 +5,8 @@ package stopped
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os/exec"
 	"testing"
 	"time"
 )
@@ -21,5 +23,38 @@ func TestCommandStopsTheChildAndWhatItStarted(t *testing.T) {
 	}
 	if took := time.Since(start); took > 3*time.Second {
 		t.Fatalf("the command ran on for %s after the deadline", took)
+	}
+}
+
+// exitError runs a shell command that fails and returns its error.
+func exitError(t *testing.T, script string) error {
+	t.Helper()
+	err := exec.Command("sh", "-c", script).Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("%s: got %v", script, err)
+	}
+	return err
+}
+
+func TestKilledOnlyBlamesTheStopForAKill(t *testing.T) {
+	ended := func() context.Context {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx
+	}
+	exited := exitError(t, "exit 2")
+	signalled := exitError(t, "kill -9 $$")
+	if Killed(ended(), exited) != nil {
+		t.Error("a command that exited with a status of its own failed by itself")
+	}
+	if !errors.Is(Killed(ended(), signalled), context.Canceled) {
+		t.Error("a command killed after the context ended was stopped")
+	}
+	if !errors.Is(Killed(ended(), fmt.Errorf("start: %w", errors.New("broken pipe"))), context.Canceled) {
+		t.Error("a command that did not run to completion after the context ended was stopped")
+	}
+	if Killed(context.Background(), signalled) != nil || Killed(ended(), nil) != nil {
+		t.Error("no stop without an ended context and an error")
 	}
 }

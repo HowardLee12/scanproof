@@ -109,7 +109,7 @@ func makeSBOM(ctx context.Context, opts scanOptions, env Env, raw []byte) ([]byt
 	if err == nil {
 		return sbom, nil
 	}
-	if stopped.Check(ctx) != nil {
+	if isStop(err) {
 		return nil, err
 	}
 	if opts.Dir.Enabled && opts.Store != "" {
@@ -130,8 +130,8 @@ func writePDF(ctx context.Context, opts scanOptions, env Env, doc report.Documen
 		return false, nil
 	}
 	if err := renderer.Render(ctx, doc, resultsHash, filepath.Join(opts.OutDir, pdfFile)); err != nil {
-		if stop := stopped.Check(ctx); stop != nil {
-			return false, stopped.InPhase(stop, "making the PDF")
+		if isStop(err) {
+			return false, err
 		}
 		fmt.Fprintf(env.Stderr, "scanproof: warning: %v; skipping %s\n", err, pdfFile)
 		return false, nil
@@ -176,10 +176,7 @@ func uploadFiles(ctx context.Context, st store.Store, dir, prefix string, names 
 			return fmt.Errorf("read %s for upload: %w", name, err)
 		}
 		if err := st.Put(ctx, prefix+name, data, contentType(name)); err != nil {
-			if stop := stopped.Check(ctx); stop != nil {
-				return stopped.InPhase(stop, "storing the evidence")
-			}
-			return err
+			return stopped.InPhase(stopped.Cause(ctx, err), "storing the evidence")
 		}
 	}
 	return nil
