@@ -23,4 +23,9 @@ func TestRescanStopsWhenCancelled(t *testing.T) {
 	if code != ExitError || !strings.Contains(stderr, want) || strings.Count(stderr, "cancelled") != 1 {
 		t.Fatalf("code %d, stderr %q", code, stderr)
 	}
+	// The totals add up: nothing failed, three were never reached.
+	totals := "ScanProof rescan: 0 images rescanned, 0 failed, 2 images and 1 directory not rescanned, 2 running images and 1 directory found\n"
+	if h.stdout.String() != totals {
+		t.Errorf("stdout %q, want %q", h.stdout.String(), totals)
+	}
 }

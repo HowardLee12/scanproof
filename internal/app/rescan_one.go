@@ -30,6 +30,9 @@ type rescanOutcome struct {
 	where string
 	doc   report.Document
 	err   error
+	// notReached are the images and directories a cancelled rescan did not
+	// get to.
+	notReached []inventory.RunningImage
 }
 
 // label names the outcome for people.
@@ -70,7 +73,7 @@ func rescanAll(ctx context.Context, opts rescanOptions, env Env, st store.Store,
 func cancelledRescan(env Env, rest []inventory.RunningImage) rescanOutcome {
 	err := fmt.Errorf("the rescan was cancelled; not rescanned: %s", countPhrase(rest, ""))
 	fmt.Fprintf(env.Stderr, "scanproof: %v\n", err)
-	return rescanOutcome{where: "rescan", err: err}
+	return rescanOutcome{where: "rescan", err: err, notReached: rest}
 }
 
 func pick(cond bool, yes, no string) string {

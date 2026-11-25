@@ -187,18 +187,24 @@ func inventoryOutcomes(env Env, failures []inventory.Failure) []rescanOutcome {
 // finishRescan prints the totals and returns the exit code: 2 when anything
 // could not be rescanned. Violations alone never fail a rescan.
 func finishRescan(env Env, outcomes []rescanOutcome, images []inventory.RunningImage) int {
-	done, failed := []inventory.RunningImage{}, 0
+	done, notReached, failed := []inventory.RunningImage{}, []inventory.RunningImage{}, 0
 	for _, o := range outcomes {
 		switch {
+		case o.notReached != nil:
+			notReached = append(notReached, o.notReached...)
 		case o.err != nil:
 			failed++
 		case o.where == "":
 			done = append(done, o.image)
 		}
 	}
-	fmt.Fprintf(env.Stdout, "ScanProof rescan: %s rescanned, %d failed, %s found\n",
-		countPhrase(done, ""), failed, countPhrase(images, "running "))
-	if failed > 0 {
+	skipped := ""
+	if len(notReached) > 0 {
+		skipped = ", " + countPhrase(notReached, "") + " not rescanned"
+	}
+	fmt.Fprintf(env.Stdout, "ScanProof rescan: %s rescanned, %d failed%s, %s found\n",
+		countPhrase(done, ""), failed, skipped, countPhrase(images, "running "))
+	if failed > 0 || len(notReached) > 0 {
 		return ExitError
 	}
 	return ExitOK
