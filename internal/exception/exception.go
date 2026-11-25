@@ -6,6 +6,8 @@ package exception
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -82,17 +84,25 @@ type file struct {
 	Exceptions []Exception `yaml:"exceptions"`
 }
 
+// Source identifies the exceptions file a scan used, so its evidence shows
+// exactly which file it was.
+type Source struct {
+	Path   string
+	SHA256 string
+}
+
 // Load reads and validates an exceptions file.
-func Load(path string) ([]Exception, error) {
+func Load(path string) ([]Exception, Source, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read exceptions file %s: %w", path, err)
+		return nil, Source{}, fmt.Errorf("read exceptions file %s: %w", path, err)
 	}
 	list, err := Parse(data)
 	if err != nil {
-		return nil, fmt.Errorf("exceptions file %s: %w", path, err)
+		return nil, Source{}, fmt.Errorf("exceptions file %s: %w", path, err)
 	}
-	return list, nil
+	sum := sha256.Sum256(data)
+	return list, Source{Path: path, SHA256: hex.EncodeToString(sum[:])}, nil
 }
 
 // Parse decodes and validates exceptions. Unknown keys are rejected so that a

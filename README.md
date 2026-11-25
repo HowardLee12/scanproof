@@ -146,7 +146,7 @@ For a secret, give the secret rule ID and the file it is in. An exception for a 
     expires: 2026-12-31
 ```
 
-Every exception must have a reason and an expiry date. After it expires, the finding counts again and the report lists the exception as expired. Exceptions that match nothing are listed as unused, so stale ones are easy to clean up.
+Every exception must have a reason and an expiry date. After it expires, the finding counts again and the report lists the exception as expired. Exceptions that match nothing are listed as unused, so stale ones are easy to clean up. Like the policy file, the exceptions file is recorded by path and SHA-256 (`exceptions.source` and `exceptions.sha256` in `results.json`, the job summary's footer and the PDF).
 
 ### Limiting an exception to some images
 
@@ -170,7 +170,7 @@ Without `artifact`, an exception applies to every image and directory the file i
 - An image is named without tag or digest (`cr.example.com/mirror/coredns/coredns`, not `...:v1.11.1` or `...@sha256:…`), exactly as the reference it was scanned or found running under, so the exception covers every tag and digest of that image. ScanProof does not add a registry: an image scanned as `alpine:3.18.0` is `alpine`, not `docker.io/library/alpine`.
 - A directory is `dir:NAME`, as given with `--name`, without a version; the exception covers every version. Whether a scan is of a directory comes from the scan itself, so an image from a registry host literally named `dir` is never matched by a `dir:` name (and cannot be scoped by one).
 - A name may end in `*` to match every name that starts with what comes before it: `cr.example.com/mirror/*` covers every image under that path, `dir:acme-*` every directory whose name starts with `acme-`. `*` is allowed only at the end, and a pattern for images never matches a directory, or the other way round. End the prefix with `/` where you can: `cr.example.com/mirror*` also matches `cr.example.com/mirror-other/…`, and a `*` right after a registry (`cr.example.com*`, `localhost:5000*`) is refused because it would match other registries too.
-- An exception for other artifacts is left out of a report entirely: it neither accepts findings there nor shows up as unused. The report lists each exception's scope next to its finding.
+- An exception for other artifacts neither accepts findings in a report nor shows up there as unused. `results.json` counts such exceptions in `exceptions.out_of_scope`, with their IDs when there are at most 20, and the job summary and the PDF say how many there are. The report lists each exception's scope next to its finding.
 - A tag, a digest, a directory version, an empty name or `artifact:` with no value (also through a YAML alias), a merge key (`<<`) in an exception, a bare `*`, upper case or an empty part between slashes is refused with an error that says what to change.
 - A rescan warns about each active exception whose `artifact` matched no running image or directory, so a typo or an exception for a retired image does not go unnoticed.
 

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -169,5 +171,23 @@ func TestNoScopeWarningWhenAnInventoryFailed(t *testing.T) {
 		"--trivy", fakeTrivy(t), "--exceptions", excs, "--out", t.TempDir(), "--notify", "never")
 	if strings.Contains(h.stderr.String(), "matched no running") {
 		t.Errorf("no scope warning while an inventory could not be read: %q", h.stderr.String())
+	}
+}
+
+func TestResultsNameTheExceptionsFile(t *testing.T) {
+	excs := filepath.Join(t.TempDir(), "exceptions.yaml")
+	writeFile(t, excs, centralExceptions)
+	out := t.TempDir()
+	h := newHarness()
+	if code := h.run("scan", "--trivy-results", fixture, "--exceptions", excs, "--out", out, "--pdf=false"); code != 0 {
+		t.Fatalf("code %d: %s", code, h.stderr.String())
+	}
+	var doc map[string]any
+	readJSON(t, filepath.Join(out, "results.json"), &doc)
+	e := doc["exceptions"].(map[string]any)
+	sum := sha256.Sum256([]byte(centralExceptions))
+	oos, _ := e["out_of_scope"].(map[string]any)
+	if e["source"] != excs || e["sha256"] != hex.EncodeToString(sum[:]) || oos["count"] != float64(2) {
+		t.Fatalf("exceptions = %v", e)
 	}
 }

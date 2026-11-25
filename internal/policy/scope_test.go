@@ -136,3 +136,13 @@ exceptions:
 		t.Error("dir:* covers every directory")
 	}
 }
+
+func TestOutOfScopeExceptionsAreCounted(t *testing.T) {
+	ev := Evaluate(imageResult("cr.example.com/team/api:2.0"), Default(), mustExceptions(t, scopedStdlib), now)
+	if len(ev.OutOfScope) != 1 || ev.OutOfScope[0].ID != "EX-GO" {
+		t.Fatalf("out of scope = %+v", ev.OutOfScope)
+	}
+	if ev := Evaluate(imageResult("cr.example.com/mirror/coredns/coredns:1"), Default(), mustExceptions(t, scopedStdlib), now); len(ev.OutOfScope) != 0 {
+		t.Errorf("an exception in scope is not out of scope: %+v", ev.OutOfScope)
+	}
+}

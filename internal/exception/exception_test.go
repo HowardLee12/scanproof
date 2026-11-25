@@ -1,6 +1,8 @@
 package exception
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -128,20 +130,24 @@ func TestLoadFromFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(validYAML), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	list, err := Load(path)
+	list, _, err := Load(path)
 	if err != nil || len(list) != 2 {
 		t.Fatalf("got %d, %v", len(list), err)
 	}
-	if _, err := Load(filepath.Join(t.TempDir(), "missing.yaml")); err == nil ||
+	if _, _, err := Load(filepath.Join(t.TempDir(), "missing.yaml")); err == nil ||
 		!strings.Contains(err.Error(), "missing.yaml") {
 		t.Fatalf("expected an error naming the missing file, got %v", err)
 	}
 }
 
 func TestExampleExceptionsAreValid(t *testing.T) {
-	list, err := Load("../../examples/exceptions.yaml")
+	list, src, err := Load("../../examples/exceptions.yaml")
 	if err != nil || len(list) != 3 {
 		t.Fatalf("got %d exceptions, %v", len(list), err)
+	}
+	data, _ := os.ReadFile("../../examples/exceptions.yaml")
+	if sum := sha256.Sum256(data); src.Path != "../../examples/exceptions.yaml" || src.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Errorf("source = %+v", src)
 	}
 	if !list[2].AppliesTo(model.ArtifactID{Name: "cr.example.com/mirror/coredns/coredns"}) || list[2].AppliesTo(model.ArtifactID{Name: "example-api"}) {
 		t.Errorf("the scoped example should apply to its image only: %+v", list[2])

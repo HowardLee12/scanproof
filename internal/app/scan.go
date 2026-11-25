@@ -247,9 +247,10 @@ func importResults(path string) (trivy.Scan, error) {
 
 // evalSetup is the policy and exceptions every scan in a run is checked with.
 type evalSetup struct {
-	pol  policy.Policy
-	src  policy.Source
-	excs []exception.Exception
+	pol    policy.Policy
+	src    policy.Source
+	excs   []exception.Exception
+	excSrc exception.Source
 }
 
 func loadSetup(policyPath string, mode policy.Mode, exceptionsPath string) (evalSetup, error) {
@@ -265,7 +266,7 @@ func loadSetup(policyPath string, mode policy.Mode, exceptionsPath string) (eval
 	}
 	if exceptionsPath != "" {
 		var err error
-		if setup.excs, err = exception.Load(exceptionsPath); err != nil {
+		if setup.excs, setup.excSrc, err = exception.Load(exceptionsPath); err != nil {
 			return evalSetup{}, err
 		}
 	}
@@ -280,16 +281,17 @@ func buildDocument(env Env, setup evalSetup, res model.ScanResult, trigger strin
 		return report.Document{}, err
 	}
 	return report.Build(report.Input{
-		ReportID:     id,
-		GeneratedAt:  now,
-		Tool:         report.Tool{Name: "scanproof", Version: Version},
-		Trigger:      trigger,
-		Result:       res,
-		Evaluation:   policy.Evaluate(res, setup.pol, setup.excs, now),
-		Policy:       setup.pol,
-		PolicySource: setup.src,
-		Context:      ci,
-		Runtime:      rt,
+		ReportID:         id,
+		GeneratedAt:      now,
+		Tool:             report.Tool{Name: "scanproof", Version: Version},
+		Trigger:          trigger,
+		Result:           res,
+		Evaluation:       policy.Evaluate(res, setup.pol, setup.excs, now),
+		Policy:           setup.pol,
+		PolicySource:     setup.src,
+		ExceptionsSource: setup.excSrc,
+		Context:          ci,
+		Runtime:          rt,
 	}), nil
 }
 

@@ -66,16 +66,19 @@ type Evaluation struct {
 	// Expired are exceptions that would have matched but have expired.
 	Expired []exception.Exception
 	// Unused are active exceptions that matched nothing in this image.
-	Unused  []exception.Exception
-	Rules   []RuleResult
-	Verdict Verdict
+	Unused []exception.Exception
+	// OutOfScope are exceptions limited to other images and directories.
+	OutOfScope []exception.Exception
+	Rules      []RuleResult
+	Verdict    Verdict
 }
 
 // Evaluate applies exceptions and the policy to a scan result. Exceptions
 // limited to other artifacts are left out entirely: they neither accept
 // findings nor count as unused. It does not modify its inputs.
 func Evaluate(res model.ScanResult, p Policy, excs []exception.Exception, now time.Time) Evaluation {
-	tracker := newExceptionTracker(inScope(excs, res.ArtifactID()), now)
+	in, out := splitByScope(excs, res.ArtifactID())
+	tracker := newExceptionTracker(in, now)
 
 	vulns := make([]VulnerabilityFinding, 0, len(res.Vulnerabilities))
 	vulnViolations := 0
@@ -134,6 +137,7 @@ func Evaluate(res model.ScanResult, p Policy, excs []exception.Exception, now ti
 		Applied:         applied,
 		Expired:         expired,
 		Unused:          unused,
+		OutOfScope:      out,
 		Rules:           rules,
 		Verdict:         verdict(p.Mode, vulnViolations+secretViolations+malwareViolations+unscanned),
 	}
@@ -178,15 +182,18 @@ type exceptionTracker struct {
 	expired map[string]bool
 }
 
-// inScope returns the exceptions that apply to the named artifact.
-func inScope(list []exception.Exception, artifact model.ArtifactID) []exception.Exception {
-	out := make([]exception.Exception, 0, len(list))
+// splitByScope separates the exceptions that apply to the artifact from
+// those limited to other artifacts.
+func splitByScope(list []exception.Exception, artifact model.ArtifactID) (in, out []exception.Exception) {
+	in = make([]exception.Exception, 0, len(list))
 	for _, ex := range list {
 		if ex.AppliesTo(artifact) {
+			in = append(in, ex)
+		} else {
 			out = append(out, ex)
 		}
 	}
-	return out
+	return in, out
 }
 
 func newExceptionTracker(list []exception.Exception, now time.Time) *exceptionTracker {

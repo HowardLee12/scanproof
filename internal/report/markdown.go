@@ -34,8 +34,13 @@ func Markdown(doc Document) string {
 	writeNotChecked(&b, coverageOf(doc))
 	writeExceptions(&b, doc.Exceptions)
 
-	fmt.Fprintf(&b, "<sub>Report %s · %s %s · scanned %s with %s · policy: %s</sub>\n",
-		doc.ReportID, digestLabel(doc), code(doc.Image.Digest), formatTime(doc.ScannedAt), scannerDescription(doc), doc.Policy.Source)
+	exceptions := ""
+	if label := exceptionsFileLabel(doc.Exceptions); label != "" {
+		exceptions = " · exceptions: " + cell(label)
+	}
+	fmt.Fprintf(&b, "<sub>Report %s · %s %s · scanned %s with %s · policy: %s%s</sub>\n",
+		doc.ReportID, digestLabel(doc), code(doc.Image.Digest), formatTime(doc.ScannedAt), scannerDescription(doc),
+		doc.Policy.Source, exceptions)
 	return b.String()
 }
 
@@ -218,10 +223,14 @@ func writeNotChecked(b *strings.Builder, c *model.Coverage) {
 }
 
 func writeExceptions(b *strings.Builder, e Exceptions) {
-	if len(e.Applied)+len(e.Expired)+len(e.Unused) == 0 {
+	elsewhere := outOfScopeText(e.OutOfScope)
+	if len(e.Applied)+len(e.Expired)+len(e.Unused) == 0 && elsewhere == "" {
 		return
 	}
 	b.WriteString("### Exceptions\n\n")
+	if elsewhere != "" {
+		b.WriteString(cell(elsewhere) + "\n\n")
+	}
 	for _, ex := range e.Applied {
 		fmt.Fprintf(b, "- Applied: %s\n", describeException(ex, "expires"))
 	}

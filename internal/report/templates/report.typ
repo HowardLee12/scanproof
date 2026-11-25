@@ -206,6 +206,10 @@
   text(weight: "bold", "Active exceptions that matched nothing in this " + d.subject)
   data-table((24mm, 34mm, 1fr, 34mm, 18mm), ("ID", "Finding", "Reason", "Approved by", "Expires"), d.exceptions_unused)
 }
+#if d.exceptions_out_of_scope != "" {
+  note(d.exceptions_out_of_scope)
+  linebreak()
+}
 #note[Exceptions are kept in the scanned repository, so the pull request that added each one is its approval record. An expired exception stops applying and the finding counts again.]
 
 #section("Evidence integrity")

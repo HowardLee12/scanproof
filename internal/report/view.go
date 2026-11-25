@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/HowardLee12/scanproof/internal/exception"
 	"github.com/HowardLee12/scanproof/internal/model"
 	"github.com/HowardLee12/scanproof/internal/policy"
 )
@@ -19,46 +18,48 @@ const maxPackageRows = 15
 // pdfView is the data the Typst template renders. Every value is already
 // formatted, so the template only handles layout.
 type pdfView struct {
-	Title              string     `json:"title"`
-	Subtitle           string     `json:"subtitle"`
-	ArtifactTitle      string     `json:"artifact_title"`
-	Subject            string     `json:"subject"`
-	ReportID           string     `json:"report_id"`
-	GeneratedAt        string     `json:"generated_at"`
-	ToolVersion        string     `json:"tool_version"`
-	Verdict            string     `json:"verdict"`
-	Headline           string     `json:"headline"`
-	Detail             string     `json:"detail"`
-	DigestShort        string     `json:"digest_short"`
-	ArtifactRows       []pdfRow   `json:"artifact_rows"`
-	ContextTitle       string     `json:"context_title"`
-	ContextRows        []pdfRow   `json:"context_rows"`
-	Tiles              []pdfTile  `json:"tiles"`
-	Rules              []pdfRule  `json:"rules"`
-	Scanners           [][]string `json:"scanners"`
-	Vulns              []pdfVuln  `json:"vulns"`
-	VulnsOmitted       int        `json:"vulns_omitted"`
-	LowerByPackage     [][]string `json:"lower_by_package"`
-	Secrets            [][]string `json:"secrets"`
-	ExceptionsApplied  [][]string `json:"exceptions_applied"`
-	ExceptionsExpired  [][]string `json:"exceptions_expired"`
-	ExceptionsUnused   [][]string `json:"exceptions_unused"`
-	IntegrityRows      []pdfRow   `json:"integrity_rows"`
-	SecretsNote        string     `json:"secrets_note"`
-	SecretsNone        string     `json:"secrets_none"`
-	SecretsSkips       string     `json:"secrets_skips"`
-	CoverageCaveats    []string   `json:"coverage_caveats"`
-	NotScanned         [][]string `json:"not_scanned"`
-	SecretsSkipped     [][]string `json:"secrets_skipped"`
-	SecretsSkippedNote string     `json:"secrets_skipped_note"`
-	Malware            bool       `json:"malware"`
-	LayerColumn        bool       `json:"layer_column"`
-	MalwareEngines     [][]string `json:"malware_engines"`
-	MalwareStats       string     `json:"malware_stats"`
-	MalwareLimits      string     `json:"malware_limits"`
-	MalwareFindings    [][]string `json:"malware_findings"`
-	MalwareSkipped     [][]string `json:"malware_skipped"`
-	CC68Text           string     `json:"cc68_text"`
+	Title             string     `json:"title"`
+	Subtitle          string     `json:"subtitle"`
+	ArtifactTitle     string     `json:"artifact_title"`
+	Subject           string     `json:"subject"`
+	ReportID          string     `json:"report_id"`
+	GeneratedAt       string     `json:"generated_at"`
+	ToolVersion       string     `json:"tool_version"`
+	Verdict           string     `json:"verdict"`
+	Headline          string     `json:"headline"`
+	Detail            string     `json:"detail"`
+	DigestShort       string     `json:"digest_short"`
+	ArtifactRows      []pdfRow   `json:"artifact_rows"`
+	ContextTitle      string     `json:"context_title"`
+	ContextRows       []pdfRow   `json:"context_rows"`
+	Tiles             []pdfTile  `json:"tiles"`
+	Rules             []pdfRule  `json:"rules"`
+	Scanners          [][]string `json:"scanners"`
+	Vulns             []pdfVuln  `json:"vulns"`
+	VulnsOmitted      int        `json:"vulns_omitted"`
+	LowerByPackage    [][]string `json:"lower_by_package"`
+	Secrets           [][]string `json:"secrets"`
+	ExceptionsApplied [][]string `json:"exceptions_applied"`
+	ExceptionsExpired [][]string `json:"exceptions_expired"`
+	ExceptionsUnused  [][]string `json:"exceptions_unused"`
+	// ExceptionsOutOfScope says how many exceptions apply elsewhere.
+	ExceptionsOutOfScope string     `json:"exceptions_out_of_scope"`
+	IntegrityRows        []pdfRow   `json:"integrity_rows"`
+	SecretsNote          string     `json:"secrets_note"`
+	SecretsNone          string     `json:"secrets_none"`
+	SecretsSkips         string     `json:"secrets_skips"`
+	CoverageCaveats      []string   `json:"coverage_caveats"`
+	NotScanned           [][]string `json:"not_scanned"`
+	SecretsSkipped       [][]string `json:"secrets_skipped"`
+	SecretsSkippedNote   string     `json:"secrets_skipped_note"`
+	Malware              bool       `json:"malware"`
+	LayerColumn          bool       `json:"layer_column"`
+	MalwareEngines       [][]string `json:"malware_engines"`
+	MalwareStats         string     `json:"malware_stats"`
+	MalwareLimits        string     `json:"malware_limits"`
+	MalwareFindings      [][]string `json:"malware_findings"`
+	MalwareSkipped       [][]string `json:"malware_skipped"`
+	CC68Text             string     `json:"cc68_text"`
 }
 
 type pdfRow struct {
@@ -109,46 +110,47 @@ func newPDFView(doc Document, resultsSHA256 string) pdfView {
 	vulns, omitted := criticalAndHigh(doc.Vulnerabilities)
 	directory := doc.IsDirectory()
 	return pdfView{
-		Title:              pick(directory, "Directory Scan Report", "Container Image Scan Report"),
-		Subtitle:           subtitle(doc),
-		ArtifactTitle:      pick(directory, "Directory", "Image"),
-		Subject:            subject(doc),
-		ReportID:           doc.ReportID,
-		GeneratedAt:        formatTime(doc.GeneratedAt),
-		ToolVersion:        doc.Tool.Version,
-		Verdict:            string(doc.Verdict),
-		Headline:           headline(doc),
-		Detail:             detail(doc),
-		DigestShort:        shortDigest(doc.Image.Digest),
-		ArtifactRows:       artifactRows(doc),
-		ContextTitle:       contextTitle(doc),
-		ContextRows:        contextRows(doc),
-		Tiles:              tiles(doc),
-		Rules:              rules(doc.Policy.Rules),
-		Scanners:           [][]string{{titleCase(doc.Scanner.Name), doc.Scanner.Version, orText(formatTimePtr(doc.Scanner.DBUpdatedAt), "Not recorded")}},
-		Vulns:              vulns,
-		VulnsOmitted:       omitted,
-		LowerByPackage:     lowerByPackage(doc.Vulnerabilities),
-		Secrets:            secretRows(doc.Secrets),
-		ExceptionsApplied:  exceptionRows(doc.Exceptions.Applied),
-		ExceptionsExpired:  exceptionRows(doc.Exceptions.Expired),
-		ExceptionsUnused:   exceptionRows(doc.Exceptions.Unused),
-		IntegrityRows:      integrityRows(doc, resultsSHA256),
-		SecretsNote:        secretsNote(doc),
-		SecretsNone:        secretsNone(doc),
-		SecretsSkips:       imageSecretNote(doc),
-		CoverageCaveats:    coverageCaveats(coverageOf(doc)),
-		NotScanned:         notScannedRows(coverageOf(doc)),
-		SecretsSkipped:     secretsSkippedRows(coverageOf(doc)),
-		SecretsSkippedNote: secretsSkippedNote(coverageOf(doc)),
-		Malware:            doc.Malware != nil,
-		LayerColumn:        !directory,
-		MalwareEngines:     malwareEngines(doc.Malware),
-		MalwareStats:       malwareStats(doc.Malware, directory),
-		MalwareLimits:      malwareLimits(doc.Malware),
-		MalwareFindings:    malwareFindings(doc.Malware, directory),
-		MalwareSkipped:     malwareSkipped(doc.Malware, directory),
-		CC68Text:           cc68Text(doc.Malware, directory),
+		Title:                pick(directory, "Directory Scan Report", "Container Image Scan Report"),
+		Subtitle:             subtitle(doc),
+		ArtifactTitle:        pick(directory, "Directory", "Image"),
+		Subject:              subject(doc),
+		ReportID:             doc.ReportID,
+		GeneratedAt:          formatTime(doc.GeneratedAt),
+		ToolVersion:          doc.Tool.Version,
+		Verdict:              string(doc.Verdict),
+		Headline:             headline(doc),
+		Detail:               detail(doc),
+		DigestShort:          shortDigest(doc.Image.Digest),
+		ArtifactRows:         artifactRows(doc),
+		ContextTitle:         contextTitle(doc),
+		ContextRows:          contextRows(doc),
+		Tiles:                tiles(doc),
+		Rules:                rules(doc.Policy.Rules),
+		Scanners:             [][]string{{titleCase(doc.Scanner.Name), doc.Scanner.Version, orText(formatTimePtr(doc.Scanner.DBUpdatedAt), "Not recorded")}},
+		Vulns:                vulns,
+		VulnsOmitted:         omitted,
+		LowerByPackage:       lowerByPackage(doc.Vulnerabilities),
+		Secrets:              secretRows(doc.Secrets),
+		ExceptionsApplied:    exceptionRows(doc.Exceptions.Applied),
+		ExceptionsExpired:    exceptionRows(doc.Exceptions.Expired),
+		ExceptionsUnused:     exceptionRows(doc.Exceptions.Unused),
+		ExceptionsOutOfScope: outOfScopeText(doc.Exceptions.OutOfScope),
+		IntegrityRows:        integrityRows(doc, resultsSHA256),
+		SecretsNote:          secretsNote(doc),
+		SecretsNone:          secretsNone(doc),
+		SecretsSkips:         imageSecretNote(doc),
+		CoverageCaveats:      coverageCaveats(coverageOf(doc)),
+		NotScanned:           notScannedRows(coverageOf(doc)),
+		SecretsSkipped:       secretsSkippedRows(coverageOf(doc)),
+		SecretsSkippedNote:   secretsSkippedNote(coverageOf(doc)),
+		Malware:              doc.Malware != nil,
+		LayerColumn:          !directory,
+		MalwareEngines:       malwareEngines(doc.Malware),
+		MalwareStats:         malwareStats(doc.Malware, directory),
+		MalwareLimits:        malwareLimits(doc.Malware),
+		MalwareFindings:      malwareFindings(doc.Malware, directory),
+		MalwareSkipped:       malwareSkipped(doc.Malware, directory),
+		CC68Text:             cc68Text(doc.Malware, directory),
 	}
 }
 
@@ -318,31 +320,14 @@ func secretRows(secrets []policy.SecretFinding) [][]string {
 	return rows
 }
 
-func exceptionRows(list []exception.Exception) [][]string {
-	rows := make([][]string, 0, len(list))
-	for _, ex := range list {
-		finding := ex.Finding
-		if ex.Package != "" {
-			finding += " in " + ex.Package
-		}
-		if scope := ex.Scope(); scope != "" {
-			finding += ", " + scope
-		}
-		approver := ex.ApprovedBy
-		if approver == "" {
-			approver = "See the pull request that added it"
-		}
-		rows = append(rows, []string{ex.ID, finding, ex.Reason, approver, ex.Expires.String()})
-	}
-	return rows
-}
-
 func integrityRows(doc Document, resultsSHA256 string) []pdfRow {
 	return nonEmpty([]pdfRow{
 		{Label: "Report ID", Value: doc.ReportID},
 		{Label: "results.json SHA-256", Value: resultsSHA256, Mono: true},
 		{Label: "Policy", Value: doc.Policy.Source},
 		{Label: "Policy SHA-256", Value: doc.Policy.SHA256, Mono: true},
+		{Label: "Exceptions", Value: doc.Exceptions.Source},
+		{Label: "Exceptions SHA-256", Value: doc.Exceptions.SHA256, Mono: true},
 		{Label: "Other files", Value: "Hashes of every output file are in manifest.json."},
 	})
 }
