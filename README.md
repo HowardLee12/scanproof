@@ -183,7 +183,7 @@ scanproof scan --dir --name NAME [--version VERSION] [flags] PATH
   --trivy-results FILE   use an existing Trivy JSON report (not with --dir)
   --trivy PATH           trivy binary (default trivy)
   --typst PATH           typst binary used for the PDF (default typst)
-  --timeout DURATION     scan time limit (default 30m)
+  --timeout DURATION     time limit for the whole scan (default 30m); see docs/malware.md
 ```
 
 In GitHub Actions, ScanProof also appends the summary to the job page, adds a warning or error annotation, and sets the step outputs `verdict`, `report-id`, `violations`, `results`, `evidence-dir` and, with a store, `evidence-url`.
