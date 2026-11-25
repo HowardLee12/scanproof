@@ -146,6 +146,9 @@ func writeMalware(b *strings.Builder, m *MalwareSection, directory bool) {
 	}
 	fmt.Fprintf(b, "### Malware\n\nScanned %d files (%s) %s with %s. %s.\n\n", m.FilesScanned, formatBytes(m.BytesScanned),
 		where, strings.Join(engines, " and "), plural(len(m.Findings), "detection", "detections"))
+	if limits := malwareLimits(m); limits != "" {
+		b.WriteString(limits + "\n\n")
+	}
 	writeMalwareFindings(b, m.Findings, directory)
 	if len(m.Skipped) > 0 {
 		fmt.Fprintf(b, "%s not fully scanned (size limit or a ClamAV limit); see results.json.\n\n",

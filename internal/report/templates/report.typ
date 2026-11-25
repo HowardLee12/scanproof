@@ -168,7 +168,12 @@
   section("Malware", note: str(d.malware_findings.len()) + " detections")
   data-table((1fr, 30mm, 40mm, 40mm), ("Engine", "Version", "Signatures", "Signatures updated"), d.malware_engines)
   note(d.malware_stats)
+  if d.malware_limits != "" {
+    linebreak()
+    note(d.malware_limits)
+  }
   if d.malware_findings.len() == 0 {
+    linebreak()
     note[No malware was detected.]
   } else if d.layer_column {
     data-table((20mm, 1fr, 1fr, 12mm, 28mm), ("Engine", "Signature", "File", "Layer", "Status"), d.malware_findings,

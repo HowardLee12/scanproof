@@ -54,6 +54,7 @@ type Summary struct {
 // TreeDigest.
 type MalwareSection struct {
 	Engines      []model.MalwareEngine   `json:"engines"`
+	Limits       *model.MalwareLimits    `json:"limits,omitempty"`
 	ImageSource  string                  `json:"image_source,omitempty"`
 	ConfigDigest string                  `json:"config_digest,omitempty"`
 	TreeDigest   string                  `json:"tree_digest,omitempty"`
@@ -248,6 +249,7 @@ func malwareSection(scan *model.MalwareScan, findings []policy.MalwareFinding) *
 	}
 	return &MalwareSection{
 		Engines:      orEmpty(scan.Engines),
+		Limits:       scan.Limits,
 		ImageSource:  scan.ImageSource,
 		ConfigDigest: scan.ConfigDigest,
 		TreeDigest:   scan.TreeDigest,

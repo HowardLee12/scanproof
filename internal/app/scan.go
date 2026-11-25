@@ -192,13 +192,14 @@ func scanMalware(ctx context.Context, opts scanOptions, env Env) (*model.Malware
 func malwareScanner(opts scanOptions, env Env) malware.Scanner {
 	m := opts.Malware
 	scanner := malware.Scanner{
-		ClamAV:       malware.NewClamAV(m.ClamscanBin, m.ClamAVDB),
-		MaxFileBytes: m.MaxFileMB << 20,
-		TryDaemon:    m.DockerDaemon,
-		WorkDir:      m.WorkDir,
-		Platform:     opts.Platform,
-		Warn:         func(msg string) { fmt.Fprintf(env.Stderr, "scanproof: warning: %s\n", msg) },
-		Progress:     func(msg string) { fmt.Fprintf(env.Stderr, "scanproof: %s\n", msg) },
+		ClamAV:          malware.NewClamAV(m.ClamscanBin, m.ClamAVDB),
+		MaxFileBytes:    m.MaxFileMB << 20,
+		MaxArchiveFiles: m.MaxArchiveFiles,
+		TryDaemon:       m.DockerDaemon,
+		WorkDir:         m.WorkDir,
+		Platform:        opts.Platform,
+		Warn:            func(msg string) { fmt.Fprintf(env.Stderr, "scanproof: warning: %s\n", msg) },
+		Progress:        func(msg string) { fmt.Fprintf(env.Stderr, "scanproof: %s\n", msg) },
 	}
 	if m.YaraRules != "" {
 		y := malware.NewYara(m.YaraBin, m.YaraRules)

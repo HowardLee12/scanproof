@@ -55,6 +55,7 @@ type pdfView struct {
 	LayerColumn        bool       `json:"layer_column"`
 	MalwareEngines     [][]string `json:"malware_engines"`
 	MalwareStats       string     `json:"malware_stats"`
+	MalwareLimits      string     `json:"malware_limits"`
 	MalwareFindings    [][]string `json:"malware_findings"`
 	MalwareSkipped     [][]string `json:"malware_skipped"`
 	CC68Text           string     `json:"cc68_text"`
@@ -144,6 +145,7 @@ func newPDFView(doc Document, resultsSHA256 string) pdfView {
 		LayerColumn:        !directory,
 		MalwareEngines:     malwareEngines(doc.Malware),
 		MalwareStats:       malwareStats(doc.Malware, directory),
+		MalwareLimits:      malwareLimits(doc.Malware),
 		MalwareFindings:    malwareFindings(doc.Malware, directory),
 		MalwareSkipped:     malwareSkipped(doc.Malware, directory),
 		CC68Text:           cc68Text(doc.Malware, directory),
