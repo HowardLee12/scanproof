@@ -43,8 +43,10 @@ func writeEvidence(ctx context.Context, opts scanOptions, env Env, doc report.Do
 	}
 	path := func(name string) string { return filepath.Join(opts.OutDir, name) }
 
-	// Optional files from an earlier run must never sit next to new results.
-	for _, name := range []string{pdfFile, sbomFile} {
+	// Files from an earlier run must never sit next to new results: the
+	// optional ones may not be written again, and the manifest is written
+	// last, so a run that stops on the way must not leave the old one.
+	for _, name := range []string{manifestFile, pdfFile, sbomFile} {
 		if err := os.Remove(path(name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("remove old %s: %w", name, err)
 		}
