@@ -106,7 +106,7 @@ func (r Runner) scanArtifact(ctx context.Context, mode, target string, extra []s
 	args := append([]string{mode, "--quiet", "--format", "json", "--scanners", "vuln,secret", "--list-all-pkgs",
 		"--secret-config", config}, r.hardenedFlags()...)
 	args = append(args, extra...)
-	out, err := r.run(ctx, "the Trivy scan", append(args, target)...)
+	out, err := r.run(ctx, "during the Trivy scan", append(args, target)...)
 	if err != nil {
 		return Scan{}, fmt.Errorf("trivy scan of %s failed: %w", target, err)
 	}
@@ -150,7 +150,7 @@ func (r Runner) ScanSBOM(ctx context.Context, sbom []byte) (Scan, error) {
 		return Scan{}, fmt.Errorf("write SBOM: %w", err)
 	}
 	args := append([]string{"sbom", "--quiet", "--format", "json", "--scanners", "vuln"}, r.hardenedFlags()...)
-	out, err := r.run(ctx, "the Trivy SBOM scan", append(args, path)...)
+	out, err := r.run(ctx, "during the Trivy SBOM scan", append(args, path)...)
 	if err != nil {
 		return Scan{}, fmt.Errorf("trivy SBOM scan failed: %w", err)
 	}
@@ -197,7 +197,7 @@ func (r Runner) SBOM(ctx context.Context, raw []byte) ([]byte, error) {
 	if err := os.WriteFile(in, raw, 0o600); err != nil {
 		return nil, fmt.Errorf("write trivy report: %w", err)
 	}
-	if _, err := r.run(ctx, "the SBOM conversion", "convert", "--format", "cyclonedx", "--output", out, in); err != nil {
+	if _, err := r.run(ctx, "during the SBOM conversion", "convert", "--format", "cyclonedx", "--output", out, in); err != nil {
 		return nil, fmt.Errorf("convert trivy report to an SBOM: %w", err)
 	}
 	sbom, err := os.ReadFile(out)

@@ -176,7 +176,7 @@ func uploadFiles(ctx context.Context, st store.Store, dir, prefix string, names 
 			return fmt.Errorf("read %s for upload: %w", name, err)
 		}
 		if err := st.Put(ctx, prefix+name, data, contentType(name)); err != nil {
-			return stopped.InPhase(stopped.Cause(ctx, err), "storing the evidence")
+			return stopped.InPhase(stopped.Cause(ctx, err), "while storing the evidence")
 		}
 	}
 	return nil

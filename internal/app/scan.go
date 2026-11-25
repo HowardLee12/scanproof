@@ -76,7 +76,7 @@ func scanAndStore(ctx context.Context, opts scanOptions, env Env) (scanned, erro
 	// One deadline for the whole scan, including both reads of a directory
 	// and the malware scan. Trivy alone stops at --timeout, so it can report
 	// its own timeout before this context ends.
-	scanCtx, cancel := context.WithTimeout(ctx, opts.Timeout+timeoutGrace)
+	scanCtx, cancel := context.WithTimeout(ctx, opts.Timeout+env.timeoutGrace())
 	defer cancel()
 	scan, err := scanTarget(scanCtx, opts, env)
 	if err != nil {
@@ -221,7 +221,7 @@ func updateSignatures(ctx context.Context, m malwareOptions, env Env) error {
 		return nil
 	}
 	if stop := stopped.Killed(ctx, err); stop != nil {
-		return stopped.InPhase(stop, "the ClamAV signature update")
+		return stopped.InPhase(stop, "during the ClamAV signature update")
 	}
 	fmt.Fprintf(env.Stderr, "scanproof: warning: freshclam failed, using the existing signatures: %v: %s\n",
 		err, strings.TrimSpace(string(out)))

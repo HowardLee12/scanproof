@@ -17,7 +17,8 @@ import (
 // Error is a step that stopped because its context ended. It wraps
 // context.DeadlineExceeded or context.Canceled.
 type Error struct {
-	// Phase names the step, such as "the malware scan".
+	// Phase names the step with its preposition, such as "during the
+	// malware scan" or "while making the PDF".
 	Phase string
 	// Progress says how far it got, such as "41,233 of 95,150 files scanned".
 	Progress string
@@ -27,7 +28,7 @@ type Error struct {
 func (e *Error) Error() string {
 	msg := "stopped"
 	if e.Phase != "" {
-		msg += " during " + e.Phase
+		msg += " " + e.Phase
 	}
 	if e.Progress != "" {
 		msg += " (" + e.Progress + ")"
@@ -113,7 +114,7 @@ func Describe(err error, timeout time.Duration, what string) (msg string, ok boo
 	}
 	where := ""
 	if s.Phase != "" {
-		where = " during " + s.Phase
+		where = " " + s.Phase
 	}
 	if s.Progress != "" {
 		where += " (" + s.Progress + ")"

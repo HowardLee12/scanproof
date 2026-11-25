@@ -92,7 +92,7 @@ func runCommand(ctx context.Context, name string, args ...string) ([]byte, error
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		if stop := stopped.Killed(ctx, err); stop != nil {
-			return nil, stopped.InPhase(stop, "making the PDF")
+			return nil, stopped.InPhase(stop, "while making the PDF")
 		}
 		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}

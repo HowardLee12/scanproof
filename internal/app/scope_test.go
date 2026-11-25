@@ -156,3 +156,18 @@ func TestScanDirAppliesOnlyExceptionsForTheDirectory(t *testing.T) {
 		}
 	}
 }
+
+// When an inventory source failed, its images were never listed, so an
+// exception for them is not "unmatched".
+func TestNoScopeWarningWhenAnInventoryFailed(t *testing.T) {
+	images := filepath.Join(t.TempDir(), "images.txt")
+	writeFile(t, images, "repo/x@not-a-digest\n")
+	excs := filepath.Join(t.TempDir(), "exceptions.yaml")
+	writeFile(t, excs, centralExceptions)
+	h := newHarness()
+	h.run("rescan", "--store", "file://"+t.TempDir(), "--inventory", "file", "--images-file", images,
+		"--trivy", fakeTrivy(t), "--exceptions", excs, "--out", t.TempDir(), "--notify", "never")
+	if strings.Contains(h.stderr.String(), "matched no running") {
+		t.Errorf("no scope warning while an inventory could not be read: %q", h.stderr.String())
+	}
+}

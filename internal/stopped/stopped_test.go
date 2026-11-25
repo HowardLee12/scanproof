@@ -32,27 +32,27 @@ func TestCheckOnlyReportsAnEndedContext(t *testing.T) {
 }
 
 func TestInPhaseNamesTheInnermostStepOnly(t *testing.T) {
-	err := InPhase(InPhase(Check(expired(t)), "the malware scan"), "the directory scan")
+	err := InPhase(InPhase(Check(expired(t)), "during the malware scan"), "during the directory scan")
 	var s *Error
-	if !errors.As(err, &s) || s.Phase != "the malware scan" {
+	if !errors.As(err, &s) || s.Phase != "during the malware scan" {
 		t.Fatalf("got %+v", err)
 	}
 	plain := errors.New("clamscan exited with 2")
-	if InPhase(plain, "the malware scan") != plain {
+	if InPhase(plain, "during the malware scan") != plain {
 		t.Error("other errors pass unchanged")
 	}
 	// A timeout inside a step (an SDK's own credential lookup, an HTTP
 	// client's Timeout) is not the scan's deadline: only Check makes a stop.
 	inner := fmt.Errorf("upload: get credentials: %w", context.DeadlineExceeded)
-	if InPhase(inner, "storing the evidence") != inner {
+	if InPhase(inner, "while storing the evidence") != inner {
 		t.Error("a wrapped context error that Check did not make passes unchanged")
 	}
 }
 
 func TestWithProgressKeepsTheLast(t *testing.T) {
-	err := WithProgress(WithProgress(InPhase(Check(expired(t)), "the malware scan"), "9 of 9 files read"), "41,233 of 95,150 files scanned")
+	err := WithProgress(WithProgress(InPhase(Check(expired(t)), "during the malware scan"), "9 of 9 files read"), "41,233 of 95,150 files scanned")
 	var s *Error
-	if !errors.As(err, &s) || s.Progress != "41,233 of 95,150 files scanned" || s.Phase != "the malware scan" {
+	if !errors.As(err, &s) || s.Progress != "41,233 of 95,150 files scanned" || s.Phase != "during the malware scan" {
 		t.Fatalf("got %+v", s)
 	}
 	if plain := errors.New("x"); WithProgress(plain, "1 of 2") != plain {
@@ -62,7 +62,7 @@ func TestWithProgressKeepsTheLast(t *testing.T) {
 
 func TestDescribe(t *testing.T) {
 	deep := fmt.Errorf("malware scan of /scan/venv: some/file.h: %w",
-		WithProgress(InPhase(Check(expired(t)), "the malware scan"), "41,233 of 95,150 files scanned"))
+		WithProgress(InPhase(Check(expired(t)), "during the malware scan"), "41,233 of 95,150 files scanned"))
 	msg, ok := Describe(deep, 30*time.Minute, "the scan")
 	want := "the scan stopped at its --timeout of 30m0s during the malware scan (41,233 of 95,150 files scanned); raise --timeout"
 	if !ok || msg != want {
@@ -70,8 +70,13 @@ func TestDescribe(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	msg, _ = Describe(InPhase(Check(ctx), "the Trivy scan"), time.Minute, "the scan")
+	msg, _ = Describe(InPhase(Check(ctx), "during the Trivy scan"), time.Minute, "the scan")
 	if msg != "the scan was cancelled during the Trivy scan" {
+		t.Errorf("got %q", msg)
+	}
+	// A phase says its own preposition.
+	msg, _ = Describe(InPhase(Check(expired(t)), "while making the PDF"), time.Minute, "the scan")
+	if msg != "the scan stopped at its --timeout of 1m0s while making the PDF; raise --timeout" {
 		t.Errorf("got %q", msg)
 	}
 	if _, ok := Describe(errors.New("boom"), time.Minute, "the scan"); ok {
@@ -96,7 +101,7 @@ func TestCause(t *testing.T) {
 		!errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("a context error after the scan's deadline passed is the stop: %v", err)
 	}
-	named := InPhase(Check(expired(t)), "the malware scan")
+	named := InPhase(Check(expired(t)), "during the malware scan")
 	if Cause(expired(t), named) != named {
 		t.Error("a stop is kept as it is")
 	}

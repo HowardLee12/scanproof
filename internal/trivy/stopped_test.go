@@ -33,10 +33,10 @@ func shortContext(t *testing.T) context.Context {
 func TestRunnerReportsTheDeadlineAndThePhase(t *testing.T) {
 	r := Runner{Bin: "trivy", exec: waitForDeadline}
 	cases := map[string]func(context.Context) error{
-		"the Trivy scan":      func(ctx context.Context) error { _, err := r.Scan(ctx, "alpine:3.18.0"); return err },
-		"the Trivy scan ":     func(ctx context.Context) error { _, err := r.ScanRootfs(ctx, "/srv/app"); return err },
-		"the Trivy SBOM scan": func(ctx context.Context) error { _, err := r.ScanSBOM(ctx, []byte("{}")); return err },
-		"the SBOM conversion": func(ctx context.Context) error { _, err := r.SBOM(ctx, []byte("{}")); return err },
+		"during the Trivy scan":      func(ctx context.Context) error { _, err := r.Scan(ctx, "alpine:3.18.0"); return err },
+		"during the Trivy scan ":     func(ctx context.Context) error { _, err := r.ScanRootfs(ctx, "/srv/app"); return err },
+		"during the Trivy SBOM scan": func(ctx context.Context) error { _, err := r.ScanSBOM(ctx, []byte("{}")); return err },
+		"during the SBOM conversion": func(ctx context.Context) error { _, err := r.SBOM(ctx, []byte("{}")); return err },
 	}
 	for phase, run := range cases {
 		err := run(shortContext(t))

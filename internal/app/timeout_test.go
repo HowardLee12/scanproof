@@ -8,15 +8,6 @@ import (
 	"time"
 )
 
-// noGrace makes the scan's deadline exactly --timeout, so tests can use a
-// short one.
-func noGrace(t *testing.T) {
-	t.Helper()
-	saved := timeoutGrace
-	timeoutGrace = 0
-	t.Cleanup(func() { timeoutGrace = saved })
-}
-
 // sleepyTool is a fake tool that answers --version and otherwise runs body.
 func sleepyTool(t *testing.T, body string) string {
 	t.Helper()
@@ -29,8 +20,8 @@ func sleepyTool(t *testing.T, body string) string {
 }
 
 func TestScanDirReportsTheTimeoutDuringTheMalwareScan(t *testing.T) {
-	noGrace(t)
 	h := newHarness()
+	h.noGrace()
 	code := h.run("scan", "--dir", "--name", "acme-vllm", "--trivy", fakeTrivy(t), "--out", t.TempDir(), "--pdf=false",
 		"--sbom=false", "--malware", "--clamscan", sleepyTool(t, "sleep 10"), "--timeout", "500ms", makeSoftwareDir(t))
 	want := "scanproof: the scan stopped at its --timeout of 500ms during the malware scan (0 of 3 files scanned); raise --timeout\n"
@@ -45,8 +36,8 @@ func TestScanDirReportsTheTimeoutDuringTheMalwareScan(t *testing.T) {
 }
 
 func TestScanReportsTheTimeoutDuringTrivy(t *testing.T) {
-	noGrace(t)
 	h := newHarness()
+	h.noGrace()
 	bin := trivyScript(t, `if [ "$1" = rootfs ] || [ "$1" = image ]; then sleep 10; fi`)
 	code := h.run("scan", "--dir", "--name", "acme-vllm", "--trivy", bin, "--out", t.TempDir(), "--pdf=false",
 		"--timeout", "500ms", makeSoftwareDir(t))
@@ -68,8 +59,8 @@ func TestAClamscanKilledBeforeTheDeadlineIsReportedAsSuch(t *testing.T) {
 }
 
 func TestFreshclamCutOffByTheTimeoutStopsTheScan(t *testing.T) {
-	noGrace(t)
 	h := newHarness()
+	h.noGrace()
 	code := h.run("scan", "--dir", "--name", "acme-vllm", "--trivy", fakeTrivy(t), "--out", t.TempDir(), "--pdf=false",
 		"--sbom=false", "--malware", "--clamscan", fakeClamscan(t), "--clamav-update", "--freshclam", sleepyTool(t, "sleep 10"),
 		"--timeout", "500ms", makeSoftwareDir(t))
@@ -88,17 +79,17 @@ func TestScanDirPrintsMalwareProgress(t *testing.T) {
 }
 
 func TestRescanTimeoutNamesTheImage(t *testing.T) {
-	noGrace(t)
 	storeDir := t.TempDir()
 	digest := seedDirectoryScan(t, storeDir, fakeTrivy(t), makeSoftwareDir(t))
 	images := filepath.Join(t.TempDir(), "images.txt")
 	writeFile(t, images, "dir:acme-vllm:0.9.1@"+digest+"\n")
 	h := newHarness()
+	h.noGrace()
 	received := notifyServer(t, h)
 	start := time.Now()
 	code := h.run("rescan", "--store", "file://"+storeDir, "--inventory", "file", "--images-file", images,
 		"--trivy", trivyScript(t, `if [ "$1" = sbom ]; then sleep 10; fi`), "--out", t.TempDir(), "--timeout", "500ms")
-	want := "scanproof: directory acme-vllm:0.9.1: the rescan of this image stopped at its --timeout of 500ms during the Trivy SBOM scan; raise --timeout"
+	want := "scanproof: directory acme-vllm:0.9.1: the rescan of this directory stopped at its --timeout of 500ms during the Trivy SBOM scan; raise --timeout"
 	if code != ExitError || !strings.Contains(h.stderr.String(), want) || time.Since(start) > 8*time.Second {
 		t.Fatalf("code %d after %s, stderr %q", code, time.Since(start), h.stderr.String())
 	}

@@ -7,10 +7,6 @@ import (
 	"github.com/HowardLee12/scanproof/internal/stopped"
 )
 
-// timeoutGrace is how long a scan may run past --timeout. Trivy gets
-// --timeout itself, so it can stop and report on its own first.
-var timeoutGrace = time.Minute
-
 // describedError says, in one sentence, that a scan stopped at its
 // --timeout or was cancelled, instead of how the step it was in failed.
 type describedError struct {

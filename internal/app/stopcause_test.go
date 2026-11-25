@@ -40,8 +40,7 @@ func TestAContextErrorAfterTheDeadlineIsTheStop(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, resultsFile), "{}")
 	err := uploadFiles(ctx, putFailingStore{err: fmt.Errorf("put: %w", context.Canceled)}, dir, "scans/x/", []string{resultsFile})
-	if msg := describeStop(err, time.Minute, "the scan").Error(); !strings.HasPrefix(msg, "the scan was cancelled") ||
-		!strings.Contains(msg, "storing the evidence") {
+	if msg := describeStop(err, time.Minute, "the scan").Error(); msg != "the scan was cancelled while storing the evidence" {
 		t.Fatalf("got %q", msg)
 	}
 	if !errors.Is(err, context.Canceled) {
