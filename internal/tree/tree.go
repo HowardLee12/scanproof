@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/HowardLee12/scanproof/internal/stopped"
 )
 
 // Algorithm names the encoding. It is hashed first, so a future change to
@@ -124,19 +126,43 @@ func ResolveRoot(path string) (string, error) {
 	return resolved, nil
 }
 
+// Options tune a walk; the zero value only hashes.
+type Options struct {
+	// Content, when set, receives each file's bytes as they are hashed, so
+	// a caller can process exactly the bytes the digest covers.
+	Content ContentFunc
+	// Listed, when set, is told the number of regular files once the
+	// directory is listed, before any file is read.
+	Listed func(files int)
+}
+
 // Digest walks root without following symlinks and returns its tree digest.
-// content, when not nil, receives each file's bytes as they are hashed, so a
-// caller can process exactly the bytes the digest covers. Every read goes
-// through an os.Root, so nothing outside root is ever opened.
+// content, when not nil, receives each file's bytes as they are hashed.
+// Every read goes through an os.Root, so nothing outside root is ever
+// opened.
 func Digest(ctx context.Context, root string, content ContentFunc) (Result, error) {
+	return DigestWith(ctx, root, Options{Content: content})
+}
+
+// DigestWith is Digest with options. If the context ends, the error is a
+// *stopped.Error that says how many files were read, not which file the
+// walk was at.
+func DigestWith(ctx context.Context, root string, opts Options) (Result, error) {
 	r, rootStamp, err := openRoot(root)
 	if err != nil {
 		return Result{}, err
 	}
 	defer r.Close()
 	entries, err := list(ctx, r)
+	if stop := stopped.Check(ctx); err != nil && stop != nil {
+		return Result{}, stopped.WithProgress(stop, "while listing the directory")
+	}
 	if err != nil {
 		return Result{}, err
+	}
+	files := countFiles(entries)
+	if opts.Listed != nil {
+		opts.Listed(files)
 	}
 	h := sha256.New()
 	io.WriteString(h, Algorithm+"\x00")
@@ -144,8 +170,8 @@ func Digest(ctx context.Context, root string, content ContentFunc) (Result, erro
 	for _, e := range entries {
 		sum := ""
 		if e.Type == File {
-			if sum, err = hashFile(ctx, r, e, content); err != nil {
-				return Result{}, err
+			if sum, err = hashFile(ctx, r, e, opts.Content); err != nil {
+				return Result{}, stopped.WithProgress(err, stopped.Count(res.Files)+" of "+stopped.Count(files)+" files read")
 			}
 		}
 		h.Write(record(e, sum))
@@ -153,6 +179,16 @@ func Digest(ctx context.Context, root string, content ContentFunc) (Result, erro
 	}
 	res.Digest = "sha256:" + hex.EncodeToString(h.Sum(nil))
 	return res, nil
+}
+
+func countFiles(entries []Entry) int {
+	n := 0
+	for _, e := range entries {
+		if e.Type == File {
+			n++
+		}
+	}
+	return n
 }
 
 // Unchanged reports whether two reads of a directory saw the same tree: the

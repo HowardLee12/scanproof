@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"syscall"
+
+	"github.com/HowardLee12/scanproof/internal/stopped"
 )
 
 // hashFile returns the hex SHA-256 of a file's content, passing the bytes to
@@ -33,11 +35,11 @@ func hashFile(ctx context.Context, r *os.Root, e Entry, content ContentFunc) (st
 	tee := io.TeeReader(ctxReader{ctx: ctx, r: f}, io.MultiWriter(h, n))
 	if content != nil {
 		if err := content(e, tee); err != nil {
-			return "", readError(e.Path, err)
+			return "", contentError(ctx, e.Path, err)
 		}
 	}
 	if _, err := io.Copy(io.Discard, tee); err != nil {
-		return "", readError(e.Path, err)
+		return "", contentError(ctx, e.Path, err)
 	}
 	if n.n != e.Size {
 		return "", changed(e.Path)
@@ -70,6 +72,35 @@ func openError(path string, err error) error {
 		return changed(path)
 	}
 	return fmt.Errorf("read %s: %w", path, err)
+}
+
+// NotAboutFile marks an error from a ContentFunc that is not about the file
+// being read, such as a scan of a batch of earlier files that failed, so
+// the walk does not name that file as the cause.
+func NotAboutFile(err error) error {
+	if err == nil {
+		return nil
+	}
+	return notAboutFile{err: err}
+}
+
+type notAboutFile struct{ err error }
+
+func (n notAboutFile) Error() string { return n.err.Error() }
+func (n notAboutFile) Unwrap() error { return n.err }
+
+// contentError reports why reading or processing a file failed: the
+// context ending (then the file is not the cause), an error that is not
+// about the file, or a problem with the file itself.
+func contentError(ctx context.Context, path string, err error) error {
+	var other notAboutFile
+	switch {
+	case errors.As(err, &other):
+		return other.err
+	case stopped.Check(ctx) != nil:
+		return stopped.Check(ctx)
+	}
+	return readError(path, err)
 }
 
 // readError reports a file that ended early as changed.
