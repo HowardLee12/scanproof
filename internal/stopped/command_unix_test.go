@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"testing"
 	"time"
@@ -56,5 +57,17 @@ func TestKilledOnlyBlamesTheStopForAKill(t *testing.T) {
 	}
 	if Killed(context.Background(), signalled) != nil || Killed(ended(), nil) != nil {
 		t.Error("no stop without an ended context and an error")
+	}
+}
+
+// Cancelling a command whose process group is already gone is not an
+// error: exec treats os.ErrProcessDone as "nothing left to stop".
+func TestCancelAfterTheGroupIsGone(t *testing.T) {
+	cmd := Command(context.Background(), "sh", "-c", "exit 0")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Cancel(); !errors.Is(err, os.ErrProcessDone) {
+		t.Fatalf("got %v", err)
 	}
 }
