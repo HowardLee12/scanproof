@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/HowardLee12/scanproof/internal/model"
+	"github.com/HowardLee12/scanproof/internal/stopped"
 )
 
 // maxStderr bounds how much of Trivy's stderr is copied into an error.
@@ -106,7 +106,7 @@ func (r Runner) scanArtifact(ctx context.Context, mode, target string, extra []s
 	args := append([]string{mode, "--quiet", "--format", "json", "--scanners", "vuln,secret", "--list-all-pkgs",
 		"--secret-config", config}, r.hardenedFlags()...)
 	args = append(args, extra...)
-	out, err := r.exec(ctx, r.Bin, append(args, target)...)
+	out, err := r.run(ctx, "the Trivy scan", append(args, target)...)
 	if err != nil {
 		return Scan{}, fmt.Errorf("trivy scan of %s failed: %w", target, err)
 	}
@@ -150,7 +150,7 @@ func (r Runner) ScanSBOM(ctx context.Context, sbom []byte) (Scan, error) {
 		return Scan{}, fmt.Errorf("write SBOM: %w", err)
 	}
 	args := append([]string{"sbom", "--quiet", "--format", "json", "--scanners", "vuln"}, r.hardenedFlags()...)
-	out, err := r.exec(ctx, r.Bin, append(args, path)...)
+	out, err := r.run(ctx, "the Trivy SBOM scan", append(args, path)...)
 	if err != nil {
 		return Scan{}, fmt.Errorf("trivy SBOM scan failed: %w", err)
 	}
@@ -197,7 +197,7 @@ func (r Runner) SBOM(ctx context.Context, raw []byte) ([]byte, error) {
 	if err := os.WriteFile(in, raw, 0o600); err != nil {
 		return nil, fmt.Errorf("write trivy report: %w", err)
 	}
-	if _, err := r.exec(ctx, r.Bin, "convert", "--format", "cyclonedx", "--output", out, in); err != nil {
+	if _, err := r.run(ctx, "the SBOM conversion", "convert", "--format", "cyclonedx", "--output", out, in); err != nil {
 		return nil, fmt.Errorf("convert trivy report to an SBOM: %w", err)
 	}
 	sbom, err := os.ReadFile(out)
@@ -205,6 +205,24 @@ func (r Runner) SBOM(ctx context.Context, raw []byte) ([]byte, error) {
 		return nil, fmt.Errorf("read SBOM: %w", err)
 	}
 	return sbom, nil
+}
+
+// run runs Trivy for one step. If the step fails because the scan's
+// context ended, or because Trivy reached its own --timeout (it then names
+// whatever file it was reading), the error says so and names the step,
+// instead of blaming the exit status or that file.
+func (r Runner) run(ctx context.Context, phase string, args ...string) ([]byte, error) {
+	out, err := r.exec(ctx, r.Bin, args...)
+	if err == nil {
+		return out, nil
+	}
+	if stop := stopped.Check(ctx); stop != nil {
+		return nil, stopped.InPhase(stop, phase)
+	}
+	if strings.Contains(err.Error(), "context deadline exceeded") {
+		return nil, &stopped.Error{Phase: phase, Err: context.DeadlineExceeded}
+	}
+	return nil, err
 }
 
 func firstNonEmpty(values ...string) string {
@@ -218,7 +236,7 @@ func firstNonEmpty(values ...string) string {
 
 func defaultExec(ctx context.Context, name string, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := stopped.Command(ctx, name, args...)
 	cmd.Env = safeEnviron(os.Environ())
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
