@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"time"
 
 	"github.com/HowardLee12/scanproof/internal/cicontext"
 	"github.com/HowardLee12/scanproof/internal/inventory"
@@ -45,6 +44,7 @@ func rescanAll(ctx context.Context, opts rescanOptions, env Env, st store.Store,
 	outcomes := make([]rescanOutcome, 0, len(images))
 	for _, img := range images {
 		doc, err := rescanOne(ctx, opts, env, st, setup, img)
+		err = describeStop(err, opts.Timeout, "the rescan of this image")
 		switch {
 		case errors.Is(err, errSkipped):
 			fmt.Fprintf(env.Stderr, "scanproof: skipping %s: %v\n", img.Label(), err)
@@ -62,7 +62,7 @@ func rescanAll(ctx context.Context, opts rescanOptions, env Env, st store.Store,
 // rescanOne checks one running image or deployed directory, from its stored
 // SBOM when there is one, and stores the result.
 func rescanOne(ctx context.Context, opts rescanOptions, env Env, st store.Store, setup evalSetup, img inventory.RunningImage) (report.Document, error) {
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout+time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, opts.Timeout+timeoutGrace)
 	defer cancel()
 	scan, rt, err := rescanScan(ctx, opts, env, st, img)
 	if err != nil {

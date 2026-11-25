@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"runtime"
 	"strings"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"github.com/HowardLee12/scanproof/internal/notify"
 	"github.com/HowardLee12/scanproof/internal/policy"
 	"github.com/HowardLee12/scanproof/internal/report"
+	"github.com/HowardLee12/scanproof/internal/stopped"
 	"github.com/HowardLee12/scanproof/internal/store"
 	"github.com/HowardLee12/scanproof/internal/trivy"
 )
@@ -35,7 +35,7 @@ func runScan(ctx context.Context, args []string, env Env) int {
 	}
 	done, err := scanAndStore(ctx, opts, env)
 	if err != nil {
-		return fail(env, err)
+		return fail(env, describeStop(err, opts.Timeout, "the scan"))
 	}
 	doc := done.doc
 	writeGitHubStepSummary(env, doc.Context.StepSummaryPath, report.Markdown(doc))
@@ -76,7 +76,7 @@ func scanAndStore(ctx context.Context, opts scanOptions, env Env) (scanned, erro
 	// One deadline for the whole scan, including both reads of a directory
 	// and the malware scan. Trivy alone stops at --timeout, so it can report
 	// its own timeout before this context ends.
-	scanCtx, cancel := context.WithTimeout(ctx, opts.Timeout+time.Minute)
+	scanCtx, cancel := context.WithTimeout(ctx, opts.Timeout+timeoutGrace)
 	defer cancel()
 	scan, err := scanTarget(scanCtx, opts, env)
 	if err != nil {
@@ -172,7 +172,9 @@ func sameImage(trivyImageID, malwareConfig string) error {
 func scanMalware(ctx context.Context, opts scanOptions, env Env) (*model.MalwareScan, error) {
 	m := opts.Malware
 	if m.Update {
-		updateSignatures(ctx, m, env)
+		if err := updateSignatures(ctx, m, env); err != nil {
+			return nil, err
+		}
 	}
 	if m.WorkDir != "" {
 		// The Docker daemon export is buffered in a temporary file; keep it
@@ -196,6 +198,7 @@ func malwareScanner(opts scanOptions, env Env) malware.Scanner {
 		WorkDir:      m.WorkDir,
 		Platform:     opts.Platform,
 		Warn:         func(msg string) { fmt.Fprintf(env.Stderr, "scanproof: warning: %s\n", msg) },
+		Progress:     func(msg string) { fmt.Fprintf(env.Stderr, "scanproof: %s\n", msg) },
 	}
 	if m.YaraRules != "" {
 		y := malware.NewYara(m.YaraBin, m.YaraRules)
@@ -206,16 +209,22 @@ func malwareScanner(opts scanOptions, env Env) malware.Scanner {
 
 // updateSignatures runs freshclam. A failed update only warns: the report
 // records the signature version that was actually used.
-func updateSignatures(ctx context.Context, m malwareOptions, env Env) {
+func updateSignatures(ctx context.Context, m malwareOptions, env Env) error {
 	args := []string{"--stdout", "--no-warnings"}
 	if m.ClamAVDB != "" {
 		args = append(args, "--datadir="+m.ClamAVDB)
 	}
-	cmd := exec.CommandContext(ctx, m.FreshclamBin, args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		fmt.Fprintf(env.Stderr, "scanproof: warning: freshclam failed, using the existing signatures: %v: %s\n",
-			err, strings.TrimSpace(string(out)))
+	cmd := stopped.Command(ctx, m.FreshclamBin, args...)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
 	}
+	if stop := stopped.Check(ctx); stop != nil {
+		return stopped.InPhase(stop, "the ClamAV signature update")
+	}
+	fmt.Fprintf(env.Stderr, "scanproof: warning: freshclam failed, using the existing signatures: %v: %s\n",
+		err, strings.TrimSpace(string(out)))
+	return nil
 }
 
 func importResults(path string) (trivy.Scan, error) {

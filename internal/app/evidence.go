@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/HowardLee12/scanproof/internal/report"
+	"github.com/HowardLee12/scanproof/internal/stopped"
 	"github.com/HowardLee12/scanproof/internal/store"
 	"github.com/HowardLee12/scanproof/internal/trivy"
 )
@@ -60,17 +61,11 @@ func writeEvidence(ctx context.Context, opts scanOptions, env Env, doc report.Do
 	if err := report.WriteFile(path(summaryFile), []byte(summary)); err != nil {
 		return nil, err
 	}
-	written := []string{resultsFile, summaryFile}
-
-	if sbom != nil {
-		if err := report.WriteFile(path(sbomFile), sbom); err != nil {
-			return nil, err
-		}
-		written = append(written, sbomFile)
+	optional, err := writeOptional(ctx, opts, env, doc, sbom, resultsHash)
+	if err != nil {
+		return nil, err
 	}
-	if opts.PDF && writePDF(ctx, opts, env, doc, resultsHash) {
-		written = append(written, pdfFile)
-	}
+	written := append([]string{resultsFile, summaryFile}, optional...)
 
 	manifest, err := report.BuildManifest(opts.OutDir, doc, written)
 	if err != nil {
@@ -80,6 +75,26 @@ func writeEvidence(ctx context.Context, opts scanOptions, env Env, doc report.Do
 		return nil, err
 	}
 	return append(written, manifestFile), nil
+}
+
+// writeOptional writes the SBOM, when there is one, and the PDF, when it is
+// wanted and can be made. It returns the names it wrote.
+func writeOptional(ctx context.Context, opts scanOptions, env Env, doc report.Document, sbom []byte, resultsHash string) ([]string, error) {
+	written := []string{}
+	if sbom != nil {
+		if err := report.WriteFile(filepath.Join(opts.OutDir, sbomFile), sbom); err != nil {
+			return nil, err
+		}
+		written = append(written, sbomFile)
+	}
+	if !opts.PDF {
+		return written, nil
+	}
+	made, err := writePDF(ctx, opts, env, doc, resultsHash)
+	if err != nil || !made {
+		return written, err
+	}
+	return append(written, pdfFile), nil
 }
 
 // makeSBOM converts Trivy's report into an SBOM. For an image it is only a
@@ -94,6 +109,9 @@ func makeSBOM(ctx context.Context, opts scanOptions, env Env, raw []byte) ([]byt
 	if err == nil {
 		return sbom, nil
 	}
+	if stopped.Check(ctx) != nil {
+		return nil, err
+	}
 	if opts.Dir.Enabled && opts.Store != "" {
 		return nil, fmt.Errorf("the directory's SBOM could not be made, so scanproof rescan could never check it; "+
 			"nothing was written or stored: %w", err)
@@ -102,18 +120,23 @@ func makeSBOM(ctx context.Context, opts scanOptions, env Env, raw []byte) ([]byt
 	return nil, nil
 }
 
-// writePDF never fails the scan: the JSON and Markdown evidence already exist.
-func writePDF(ctx context.Context, opts scanOptions, env Env, doc report.Document, resultsHash string) bool {
+// writePDF only warns when the PDF cannot be made: the JSON and Markdown
+// evidence already exist. A scan that was stopped or cancelled meanwhile is
+// an error.
+func writePDF(ctx context.Context, opts scanOptions, env Env, doc report.Document, resultsHash string) (bool, error) {
 	renderer := report.NewPDFRenderer(opts.TypstBin)
 	if !renderer.Available() {
 		fmt.Fprintf(env.Stderr, "scanproof: warning: %s not found; skipping %s\n", opts.TypstBin, pdfFile)
-		return false
+		return false, nil
 	}
 	if err := renderer.Render(ctx, doc, resultsHash, filepath.Join(opts.OutDir, pdfFile)); err != nil {
+		if stop := stopped.Check(ctx); stop != nil {
+			return false, stopped.InPhase(stop, "making the PDF")
+		}
 		fmt.Fprintf(env.Stderr, "scanproof: warning: %v; skipping %s\n", err, pdfFile)
-		return false
+		return false, nil
 	}
-	return true
+	return true, nil
 }
 
 // uploadEvidence copies the written files to the store, manifest last, and
@@ -153,6 +176,9 @@ func uploadFiles(ctx context.Context, st store.Store, dir, prefix string, names 
 			return fmt.Errorf("read %s for upload: %w", name, err)
 		}
 		if err := st.Put(ctx, prefix+name, data, contentType(name)); err != nil {
+			if stop := stopped.Check(ctx); stop != nil {
+				return stopped.InPhase(stop, "storing the evidence")
+			}
 			return err
 		}
 	}
