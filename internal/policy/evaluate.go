@@ -79,42 +79,9 @@ type Evaluation struct {
 func Evaluate(res model.ScanResult, p Policy, excs []exception.Exception, now time.Time) Evaluation {
 	in, out := splitByScope(excs, res.ArtifactID())
 	tracker := newExceptionTracker(in, now)
-
-	vulns := make([]VulnerabilityFinding, 0, len(res.Vulnerabilities))
-	vulnViolations := 0
-	for _, v := range res.Vulnerabilities {
-		id := tracker.matchVulnerability(v)
-		violation := id == "" && v.Severity >= p.MinSeverity && (!p.FixableOnly || v.Fixable())
-		if violation {
-			vulnViolations++
-		}
-		vulns = append(vulns, VulnerabilityFinding{Vulnerability: v, ExceptionID: id, Violation: violation})
-	}
-
-	secrets := make([]SecretFinding, 0, len(res.Secrets))
-	secretViolations := 0
-	for _, s := range res.Secrets {
-		id := tracker.matchSecret(s)
-		violation := p.BlockSecrets && id == ""
-		if violation {
-			secretViolations++
-		}
-		secrets = append(secrets, SecretFinding{Secret: s, ExceptionID: id, Violation: violation})
-	}
-
-	var malware []MalwareFinding
-	malwareViolations := 0
-	if res.Malware != nil {
-		malware = make([]MalwareFinding, 0, len(res.Malware.Detections))
-		for _, d := range res.Malware.Detections {
-			id := tracker.match(func(ex exception.Exception) bool { return ex.MatchesMalware(d) })
-			violation := p.BlockMalware && id == ""
-			if violation {
-				malwareViolations++
-			}
-			malware = append(malware, MalwareFinding{MalwareDetection: d, ExceptionID: id, Violation: violation})
-		}
-	}
+	vulns, vulnViolations := evaluateVulnerabilities(res.Vulnerabilities, p, tracker)
+	secrets, secretViolations := evaluateSecrets(res.Secrets, p, tracker)
+	malware, malwareViolations := evaluateMalware(res.Malware, p, tracker)
 
 	rules := []RuleResult{newRule(vulnerabilityRuleName(p), vulnViolations)}
 	if p.BlockSecrets {
@@ -141,6 +108,52 @@ func Evaluate(res model.ScanResult, p Policy, excs []exception.Exception, now ti
 		Rules:           rules,
 		Verdict:         verdict(p.Mode, vulnViolations+secretViolations+malwareViolations+unscanned),
 	}
+}
+
+func evaluateVulnerabilities(list []model.Vulnerability, p Policy, tracker *exceptionTracker) ([]VulnerabilityFinding, int) {
+	out := make([]VulnerabilityFinding, 0, len(list))
+	violations := 0
+	for _, v := range list {
+		id := tracker.matchVulnerability(v)
+		violation := id == "" && v.Severity >= p.MinSeverity && (!p.FixableOnly || v.Fixable())
+		if violation {
+			violations++
+		}
+		out = append(out, VulnerabilityFinding{Vulnerability: v, ExceptionID: id, Violation: violation})
+	}
+	return out, violations
+}
+
+func evaluateSecrets(list []model.Secret, p Policy, tracker *exceptionTracker) ([]SecretFinding, int) {
+	out := make([]SecretFinding, 0, len(list))
+	violations := 0
+	for _, s := range list {
+		id := tracker.matchSecret(s)
+		violation := p.BlockSecrets && id == ""
+		if violation {
+			violations++
+		}
+		out = append(out, SecretFinding{Secret: s, ExceptionID: id, Violation: violation})
+	}
+	return out, violations
+}
+
+// evaluateMalware returns nil findings when no malware scan ran.
+func evaluateMalware(scan *model.MalwareScan, p Policy, tracker *exceptionTracker) ([]MalwareFinding, int) {
+	if scan == nil {
+		return nil, 0
+	}
+	out := make([]MalwareFinding, 0, len(scan.Detections))
+	violations := 0
+	for _, d := range scan.Detections {
+		id := tracker.match(func(ex exception.Exception) bool { return ex.MatchesMalware(d) })
+		violation := p.BlockMalware && id == ""
+		if violation {
+			violations++
+		}
+		out = append(out, MalwareFinding{MalwareDetection: d, ExceptionID: id, Violation: violation})
+	}
+	return out, violations
 }
 
 func newRule(name string, found int) RuleResult {
