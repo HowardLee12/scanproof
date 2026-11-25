@@ -85,12 +85,26 @@ type SkippedFile struct {
 	Reason string `json:"reason"`
 }
 
+// MalwareLimits are the limits a malware scan ran with, exactly as they
+// were passed to ClamAV. A file larger than MaxFileBytes is not scanned.
+// Inside one file, such as an archive, ClamAV scans at most MaxArchiveFiles
+// files and MaxScanBytes bytes, and it spends at most MaxScanTimeMS on one
+// file. A file that reaches a limit is listed as not fully scanned.
+type MalwareLimits struct {
+	MaxFileBytes    int64 `json:"max_file_bytes"`
+	MaxScanBytes    int64 `json:"max_scan_bytes"`
+	MaxArchiveFiles int   `json:"max_archive_files"`
+	MaxScanTimeMS   int64 `json:"max_scan_time_ms"`
+}
+
 // MalwareScan is the result of scanning every file of every image layer, or
 // every file of a directory. Image scans set ImageSource, ConfigDigest and
 // Layers; directory scans set TreeDigest, the digest of exactly the bytes
-// the engines read.
+// the engines read. Limits is nil in results written before it was
+// recorded.
 type MalwareScan struct {
 	Engines      []MalwareEngine    `json:"engines"`
+	Limits       *MalwareLimits     `json:"limits,omitempty"`
 	ImageSource  string             `json:"image_source,omitempty"`
 	ConfigDigest string             `json:"config_digest,omitempty"`
 	TreeDigest   string             `json:"tree_digest,omitempty"`

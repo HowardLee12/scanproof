@@ -168,7 +168,12 @@
   section("Malware", note: str(d.malware_findings.len()) + " detections")
   data-table((1fr, 30mm, 40mm, 40mm), ("Engine", "Version", "Signatures", "Signatures updated"), d.malware_engines)
   note(d.malware_stats)
+  if d.malware_limits != "" {
+    linebreak()
+    note(d.malware_limits)
+  }
   if d.malware_findings.len() == 0 {
+    linebreak()
     note[No malware was detected.]
   } else if d.layer_column {
     data-table((20mm, 1fr, 1fr, 12mm, 28mm), ("Engine", "Signature", "File", "Layer", "Status"), d.malware_findings,
@@ -200,6 +205,10 @@
   v(2mm)
   text(weight: "bold", "Active exceptions that matched nothing in this " + d.subject)
   data-table((24mm, 34mm, 1fr, 34mm, 18mm), ("ID", "Finding", "Reason", "Approved by", "Expires"), d.exceptions_unused)
+}
+#if d.exceptions_out_of_scope != "" {
+  note(d.exceptions_out_of_scope)
+  linebreak()
 }
 #note[Exceptions are kept in the scanned repository, so the pull request that added each one is its approval record. An expired exception stops applying and the finding counts again.]
 

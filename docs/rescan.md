@@ -32,11 +32,25 @@ scanproof rescan --store s3://acme-scan-evidence/prod --inventory kubernetes,fil
 | `--notify` | `violation` | When to post the run summary: `violation`, `always`, `never` |
 | `--timeout` | `30m` | Time limit per image or directory |
 
-The exit code is 0 when every image and directory was rescanned and 2 when any of them failed, or when an inventory (or a line of the images file) could not be read. An inventory that fails does not stop the others: with `--inventory kubernetes,file`, the file is still rescanned when the Kubernetes API refuses access, and the failure is listed in the output and the chat message. Violations alone don't change the exit code: a rescan reports, it does not block anything.
+The exit code is 0 when every image and directory was rescanned and 2 when any of them failed, or when an inventory (or a line of the images file) could not be read. An inventory that fails does not stop the others: with `--inventory kubernetes,file`, the file is still rescanned when the Kubernetes API refuses access, and the failure is listed in the output and the chat message. Violations alone don't change the exit code: a rescan reports, it does not block anything. After `SIGINT` or `SIGTERM` the rescan stops, says once which images and directories it did not reach, and exits with 2.
 
 ### Exceptions for rescans
 
 Build-time scans read exceptions from each repository. A rescan runs centrally, so it uses the one file given with `--exceptions`. Keep that file in a repository too, so changes to it are reviewed.
+
+Because one file covers every running image and directory, give each exception an `artifact` unless it really applies everywhere. Accepting a Go `stdlib` CVE in a vendor image should not accept it in your own images too:
+
+```yaml
+exceptions:
+  - id: EX-2026-011
+    finding: CVE-2025-22871
+    package: stdlib
+    artifact: cr.example.com/mirror/coredns/coredns
+    reason: Vendor image; the vendor ships the Go fix in its next release.
+    expires: 2027-01-31
+```
+
+Each rescanned image is matched by its running reference without tag or digest, and each directory by `dir:NAME`. See [Limiting an exception to some images](../README.md#limiting-an-exception-to-some-images) for lists and `*` prefixes. An exception limited to images that are not running anywhere is left out of every report, so the rescan prints a warning for it, for example `scanproof: warning: exception EX-2026-011 is limited to cr.example.com/mirror/coredns/coredns, which matched no running image or directory`.
 
 ## Kubernetes
 

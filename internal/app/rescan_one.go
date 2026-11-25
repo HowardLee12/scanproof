@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"time"
 
 	"github.com/HowardLee12/scanproof/internal/cicontext"
 	"github.com/HowardLee12/scanproof/internal/inventory"
 	"github.com/HowardLee12/scanproof/internal/model"
 	"github.com/HowardLee12/scanproof/internal/report"
+	"github.com/HowardLee12/scanproof/internal/stopped"
 	"github.com/HowardLee12/scanproof/internal/store"
 	"github.com/HowardLee12/scanproof/internal/trivy"
 )
@@ -30,6 +30,9 @@ type rescanOutcome struct {
 	where string
 	doc   report.Document
 	err   error
+	// notReached are the images and directories a cancelled rescan did not
+	// get to.
+	notReached []inventory.RunningImage
 }
 
 // label names the outcome for people.
@@ -40,11 +43,17 @@ func (o rescanOutcome) label() string {
 	return o.image.Label()
 }
 
-// rescanAll rescans every image and directory, one at a time.
+// rescanAll rescans every image and directory, one at a time. When the
+// rescan is cancelled (SIGINT, SIGTERM), it stops and says once what was
+// not rescanned.
 func rescanAll(ctx context.Context, opts rescanOptions, env Env, st store.Store, setup evalSetup, images []inventory.RunningImage) []rescanOutcome {
 	outcomes := make([]rescanOutcome, 0, len(images))
-	for _, img := range images {
+	for i, img := range images {
+		if ctx.Err() != nil {
+			return append(outcomes, cancelledRescan(env, images[i:]))
+		}
 		doc, err := rescanOne(ctx, opts, env, st, setup, img)
+		err = describeStop(err, opts.Timeout, "the rescan of this "+pick(img.Directory, "directory", "image"))
 		switch {
 		case errors.Is(err, errSkipped):
 			fmt.Fprintf(env.Stderr, "scanproof: skipping %s: %v\n", img.Label(), err)
@@ -59,14 +68,29 @@ func rescanAll(ctx context.Context, opts rescanOptions, env Env, st store.Store,
 	return outcomes
 }
 
+// cancelledRescan reports the images and directories a cancelled rescan
+// did not reach, as one failed outcome.
+func cancelledRescan(env Env, rest []inventory.RunningImage) rescanOutcome {
+	err := fmt.Errorf("the rescan was cancelled; not rescanned: %s", countPhrase(rest, ""))
+	fmt.Fprintf(env.Stderr, "scanproof: %v\n", err)
+	return rescanOutcome{where: "rescan", err: err, notReached: rest}
+}
+
+func pick(cond bool, yes, no string) string {
+	if cond {
+		return yes
+	}
+	return no
+}
+
 // rescanOne checks one running image or deployed directory, from its stored
 // SBOM when there is one, and stores the result.
 func rescanOne(ctx context.Context, opts rescanOptions, env Env, st store.Store, setup evalSetup, img inventory.RunningImage) (report.Document, error) {
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout+time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, opts.Timeout+env.timeoutGrace())
 	defer cancel()
 	scan, rt, err := rescanScan(ctx, opts, env, st, img)
 	if err != nil {
-		return report.Document{}, err
+		return report.Document{}, stopped.Cause(ctx, err)
 	}
 	doc, err := buildDocument(env, setup, rescanResult(scan.Result, img), report.TriggerRescan, cicontext.Context{}, rt)
 	if err != nil {
@@ -79,10 +103,10 @@ func rescanOne(ctx context.Context, opts rescanOptions, env Env, st store.Store,
 	quiet := Env{Getenv: func(string) string { return "" }, Stdout: io.Discard, Stderr: env.Stderr, Now: env.Now}
 	written, err := writeEvidence(ctx, perImage, quiet, doc, scan.Raw)
 	if err != nil {
-		return report.Document{}, err
+		return report.Document{}, stopped.Cause(ctx, err)
 	}
 	if _, err := uploadEvidence(ctx, st, perImage.OutDir, doc, written); err != nil {
-		return report.Document{}, err
+		return report.Document{}, stopped.Cause(ctx, err)
 	}
 	return doc, nil
 }

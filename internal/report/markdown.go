@@ -34,8 +34,13 @@ func Markdown(doc Document) string {
 	writeNotChecked(&b, coverageOf(doc))
 	writeExceptions(&b, doc.Exceptions)
 
-	fmt.Fprintf(&b, "<sub>Report %s · %s %s · scanned %s with %s · policy: %s</sub>\n",
-		doc.ReportID, digestLabel(doc), code(doc.Image.Digest), formatTime(doc.ScannedAt), scannerDescription(doc), doc.Policy.Source)
+	exceptions := ""
+	if label := exceptionsFileLabel(doc.Exceptions); label != "" {
+		exceptions = " · exceptions: " + cell(label)
+	}
+	fmt.Fprintf(&b, "<sub>Report %s · %s %s · scanned %s with %s · policy: %s%s</sub>\n",
+		doc.ReportID, digestLabel(doc), code(doc.Image.Digest), formatTime(doc.ScannedAt), scannerDescription(doc),
+		doc.Policy.Source, exceptions)
 	return b.String()
 }
 
@@ -144,8 +149,11 @@ func writeMalware(b *strings.Builder, m *MalwareSection, directory bool) {
 	if directory {
 		where = "of the directory"
 	}
-	fmt.Fprintf(b, "### Malware\n\nScanned %d files (%s) %s with %s. %s.\n\n", m.FilesScanned, formatBytes(m.BytesScanned),
+	fmt.Fprintf(b, "### Malware\n\nScanned %s (%s) %s with %s. %s.\n\n", plural(m.FilesScanned, "file", "files"), formatBytes(m.BytesScanned),
 		where, strings.Join(engines, " and "), plural(len(m.Findings), "detection", "detections"))
+	if limits := malwareLimits(m); limits != "" {
+		b.WriteString(limits + "\n\n")
+	}
 	writeMalwareFindings(b, m.Findings, directory)
 	if len(m.Skipped) > 0 {
 		fmt.Fprintf(b, "%s not fully scanned (size limit or a ClamAV limit); see results.json.\n\n",
@@ -215,10 +223,14 @@ func writeNotChecked(b *strings.Builder, c *model.Coverage) {
 }
 
 func writeExceptions(b *strings.Builder, e Exceptions) {
-	if len(e.Applied)+len(e.Expired)+len(e.Unused) == 0 {
+	elsewhere := outOfScopeText(e.OutOfScope)
+	if len(e.Applied)+len(e.Expired)+len(e.Unused) == 0 && elsewhere == "" {
 		return
 	}
 	b.WriteString("### Exceptions\n\n")
+	if elsewhere != "" {
+		b.WriteString(cell(elsewhere) + "\n\n")
+	}
 	for _, ex := range e.Applied {
 		fmt.Fprintf(b, "- Applied: %s\n", describeException(ex, "expires"))
 	}
@@ -232,7 +244,15 @@ func writeExceptions(b *strings.Builder, e Exceptions) {
 }
 
 func describeException(ex exception.Exception, verb string) string {
-	return fmt.Sprintf("%s (%s, %s %s)", cell(ex.ID), cell(ex.Finding), verb, ex.Expires)
+	finding := cell(ex.Finding)
+	if len(ex.Artifact) > 0 {
+		names := make([]string, 0, len(ex.Artifact))
+		for _, a := range ex.Artifact {
+			names = append(names, code(a)) // a trailing * must not start emphasis
+		}
+		finding += ", only in " + strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s (%s, %s %s)", cell(ex.ID), finding, verb, ex.Expires)
 }
 
 // cell makes text safe inside a Markdown table cell.

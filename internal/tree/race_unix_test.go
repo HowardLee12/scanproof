@@ -48,13 +48,6 @@ func digestWithSwap(t *testing.T, root string, swap func()) error {
 	}
 }
 
-func mustRun(t *testing.T, err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestDigestRefusesWhatWasSwappedInAfterListing(t *testing.T) {
 	outside := filepath.Join(t.TempDir(), "outside")
 	mustWrite(t, outside, "second file", 0o644) // same content as b

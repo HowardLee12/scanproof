@@ -146,7 +146,34 @@ For a secret, give the secret rule ID and the file it is in. An exception for a 
     expires: 2026-12-31
 ```
 
-Every exception must have a reason and an expiry date. After it expires, the finding counts again and the report lists the exception as expired. Exceptions that match nothing are listed as unused, so stale ones are easy to clean up.
+Every exception must have a reason and an expiry date. After it expires, the finding counts again and the report lists the exception as expired. Exceptions that match nothing are listed as unused, so stale ones are easy to clean up. Like the policy file, the exceptions file is recorded by path and SHA-256 (`exceptions.source` and `exceptions.sha256` in `results.json`, the job summary's footer and the PDF).
+
+### Limiting an exception to some images
+
+Without `artifact`, an exception applies to every image and directory the file is used with. That is fine for a repository's own file, but a central file, such as the one a [rescan](docs/rescan.md#exceptions-for-rescans) uses, often needs to accept a finding in one image only. `artifact` takes one name or a list:
+
+```yaml
+  - id: EX-2026-011
+    finding: CVE-2025-22871
+    package: stdlib
+    artifact: cr.example.com/mirror/coredns/coredns   # only this image
+    reason: Vendor image; the vendor ships the Go fix in its next release.
+    expires: 2027-01-31
+  - id: EX-2026-012
+    finding: CVE-2025-22871
+    package: stdlib
+    artifact: ["cr.example.com/mirror/*", "dir:acme-vllm"]
+    reason: Mirrored vendor images and the vLLM virtualenv; tracked upstream.
+    expires: 2027-01-31
+```
+
+- An image is named without tag or digest (`cr.example.com/mirror/coredns/coredns`, not `...:v1.11.1` or `...@sha256:…`), exactly as the reference it was scanned or found running under, so the exception covers every tag and digest of that image. ScanProof does not add a registry: an image scanned as `alpine:3.18.0` is `alpine`, not `docker.io/library/alpine`.
+- A directory is `dir:NAME`, as given with `--name`, without a version; the exception covers every version. Whether a scan is of a directory comes from the scan itself, so an image from a registry host literally named `dir` is never matched by a `dir:` name (and cannot be scoped by one).
+- A name may end in `*` to match every name that starts with what comes before it: `cr.example.com/mirror/*` covers every image under that path, `dir:acme-*` every directory whose name starts with `acme-`. `*` is allowed only at the end, and a pattern for images never matches a directory, or the other way round. For an image, the `*` must come after a `/`: before the first `/` it could match other registries (`cr*` would match `cr.evil.io/x`, `alpine*` would match `alpine.evil.io/x`), so such a pattern is refused. End the prefix with `/` where you can: `cr.example.com/mirror*` also matches `cr.example.com/mirror-other/…`.
+- An exception for other artifacts neither accepts findings in a report nor shows up there as unused. `results.json` counts such exceptions in `exceptions.out_of_scope`, with their IDs when there are at most 20, and the job summary and the PDF say how many there are. The report lists each exception's scope next to its finding.
+- A tag, a digest, a directory version, an empty name, `artifact:` with no value (or `null`, `~`), an empty list, a bare `*`, upper case, a letter outside ASCII (such as a look-alike Cyrillic `а`) or an empty part between slashes is refused with an error that says what to change.
+- YAML anchors (`&name`), aliases (`*name`) and merge keys (`<<`) are refused anywhere in an exceptions file, for every exception: they bring in keys and values from elsewhere in the file, so an entry could mean something other than what it shows.
+- A rescan warns about each active exception whose `artifact` matched no running image or directory, so a typo or an exception for a retired image does not go unnoticed.
 
 ## Notifications
 
@@ -178,12 +205,15 @@ scanproof scan --dir --name NAME [--version VERSION] [flags] PATH
   --clamav-db DIR        ClamAV signature directory or file
   --clamav-update        run freshclam before the malware scan
   --malware-max-file-mb  skip larger files, listed in the report (default 512)
+  --malware-max-archive-files N
+                         most files ClamAV scans inside one archive (default 10000,
+                         ClamAV's own); see docs/malware.md#limits
   --platform OS/ARCH     image platform for multi-platform images (not with --dir)
   --notify WHEN          violation | always | never (default violation)
   --trivy-results FILE   use an existing Trivy JSON report (not with --dir)
   --trivy PATH           trivy binary (default trivy)
   --typst PATH           typst binary used for the PDF (default typst)
-  --timeout DURATION     scan time limit (default 30m)
+  --timeout DURATION     time limit for the whole scan (default 30m); see docs/malware.md
 ```
 
 In GitHub Actions, ScanProof also appends the summary to the job page, adds a warning or error annotation, and sets the step outputs `verdict`, `report-id`, `violations`, `results`, `evidence-dir` and, with a store, `evidence-url`.

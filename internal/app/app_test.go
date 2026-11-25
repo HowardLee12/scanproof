@@ -22,14 +22,24 @@ type harness struct {
 	stderr bytes.Buffer
 	client *http.Client
 	now    time.Time
+	ctx    context.Context
+	grace  time.Duration
 }
+
+// noGrace makes the scan's deadline (all but) exactly --timeout, so tests
+// can use a short one.
+func (h *harness) noGrace() { h.grace = time.Nanosecond }
 
 func newHarness() *harness {
 	return &harness{env: map[string]string{}}
 }
 
 func (h *harness) run(args ...string) int {
-	return Run(context.Background(), args, Env{
+	ctx := h.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return Run(ctx, args, Env{
 		Getenv: func(k string) string { return h.env[k] },
 		Stdout: &h.stdout,
 		Stderr: &h.stderr,
@@ -39,7 +49,8 @@ func (h *harness) run(args ...string) int {
 			}
 			return time.Date(2026, 11, 24, 8, 16, 48, 0, time.UTC)
 		},
-		HTTPClient: h.client,
+		HTTPClient:   h.client,
+		TimeoutGrace: h.grace,
 	})
 }
 

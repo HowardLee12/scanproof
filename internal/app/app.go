@@ -27,6 +27,19 @@ type Env struct {
 	Stderr     io.Writer
 	Now        func() time.Time
 	HTTPClient *http.Client
+	// TimeoutGrace is how long a scan may run past --timeout; zero means
+	// one minute. Trivy gets --timeout itself, so it can stop and report on
+	// its own first.
+	TimeoutGrace time.Duration
+}
+
+const defaultTimeoutGrace = time.Minute
+
+func (e Env) timeoutGrace() time.Duration {
+	if e.TimeoutGrace > 0 {
+		return e.TimeoutGrace
+	}
+	return defaultTimeoutGrace
 }
 
 const usage = `ScanProof scans a container image, or software installed in a directory, and

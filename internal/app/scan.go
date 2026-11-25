@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"runtime"
 	"strings"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"github.com/HowardLee12/scanproof/internal/notify"
 	"github.com/HowardLee12/scanproof/internal/policy"
 	"github.com/HowardLee12/scanproof/internal/report"
+	"github.com/HowardLee12/scanproof/internal/stopped"
 	"github.com/HowardLee12/scanproof/internal/store"
 	"github.com/HowardLee12/scanproof/internal/trivy"
 )
@@ -35,7 +35,7 @@ func runScan(ctx context.Context, args []string, env Env) int {
 	}
 	done, err := scanAndStore(ctx, opts, env)
 	if err != nil {
-		return fail(env, err)
+		return fail(env, describeStop(err, opts.Timeout, "the scan"))
 	}
 	doc := done.doc
 	writeGitHubStepSummary(env, doc.Context.StepSummaryPath, report.Markdown(doc))
@@ -76,11 +76,11 @@ func scanAndStore(ctx context.Context, opts scanOptions, env Env) (scanned, erro
 	// One deadline for the whole scan, including both reads of a directory
 	// and the malware scan. Trivy alone stops at --timeout, so it can report
 	// its own timeout before this context ends.
-	scanCtx, cancel := context.WithTimeout(ctx, opts.Timeout+time.Minute)
+	scanCtx, cancel := context.WithTimeout(ctx, opts.Timeout+env.timeoutGrace())
 	defer cancel()
 	scan, err := scanTarget(scanCtx, opts, env)
 	if err != nil {
-		return scanned{}, err
+		return scanned{}, stopped.Cause(scanCtx, err)
 	}
 	ci := cicontext.FromEnv(env.Getenv)
 	doc, err := buildDocument(env, setup, scan.Result, scanTrigger(ci), ci, nil)
@@ -89,10 +89,10 @@ func scanAndStore(ctx context.Context, opts scanOptions, env Env) (scanned, erro
 	}
 	written, err := writeEvidence(ctx, opts, env, doc, scan.Raw)
 	if err != nil || st == nil {
-		return scanned{doc: doc}, err
+		return scanned{doc: doc}, stopped.Cause(ctx, err)
 	}
 	location, err := uploadEvidence(ctx, st, opts.OutDir, doc, written)
-	return scanned{doc: doc, location: location, indexed: contains(written, sbomFile)}, err
+	return scanned{doc: doc, location: location, indexed: contains(written, sbomFile)}, stopped.Cause(ctx, err)
 }
 
 func scanTrigger(ci cicontext.Context) string {
@@ -172,7 +172,9 @@ func sameImage(trivyImageID, malwareConfig string) error {
 func scanMalware(ctx context.Context, opts scanOptions, env Env) (*model.MalwareScan, error) {
 	m := opts.Malware
 	if m.Update {
-		updateSignatures(ctx, m, env)
+		if err := updateSignatures(ctx, m, env); err != nil {
+			return nil, err
+		}
 	}
 	if m.WorkDir != "" {
 		// The Docker daemon export is buffered in a temporary file; keep it
@@ -190,12 +192,14 @@ func scanMalware(ctx context.Context, opts scanOptions, env Env) (*model.Malware
 func malwareScanner(opts scanOptions, env Env) malware.Scanner {
 	m := opts.Malware
 	scanner := malware.Scanner{
-		ClamAV:       malware.NewClamAV(m.ClamscanBin, m.ClamAVDB),
-		MaxFileBytes: m.MaxFileMB << 20,
-		TryDaemon:    m.DockerDaemon,
-		WorkDir:      m.WorkDir,
-		Platform:     opts.Platform,
-		Warn:         func(msg string) { fmt.Fprintf(env.Stderr, "scanproof: warning: %s\n", msg) },
+		ClamAV:          malware.NewClamAV(m.ClamscanBin, m.ClamAVDB),
+		MaxFileBytes:    m.MaxFileMB << 20,
+		MaxArchiveFiles: m.MaxArchiveFiles,
+		TryDaemon:       m.DockerDaemon,
+		WorkDir:         m.WorkDir,
+		Platform:        opts.Platform,
+		Warn:            func(msg string) { fmt.Fprintf(env.Stderr, "scanproof: warning: %s\n", msg) },
+		Progress:        func(msg string) { fmt.Fprintf(env.Stderr, "scanproof: %s\n", msg) },
 	}
 	if m.YaraRules != "" {
 		y := malware.NewYara(m.YaraBin, m.YaraRules)
@@ -206,16 +210,22 @@ func malwareScanner(opts scanOptions, env Env) malware.Scanner {
 
 // updateSignatures runs freshclam. A failed update only warns: the report
 // records the signature version that was actually used.
-func updateSignatures(ctx context.Context, m malwareOptions, env Env) {
+func updateSignatures(ctx context.Context, m malwareOptions, env Env) error {
 	args := []string{"--stdout", "--no-warnings"}
 	if m.ClamAVDB != "" {
 		args = append(args, "--datadir="+m.ClamAVDB)
 	}
-	cmd := exec.CommandContext(ctx, m.FreshclamBin, args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		fmt.Fprintf(env.Stderr, "scanproof: warning: freshclam failed, using the existing signatures: %v: %s\n",
-			err, strings.TrimSpace(string(out)))
+	cmd := stopped.Command(ctx, m.FreshclamBin, args...)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
 	}
+	if stop := cmd.Stopped(err); stop != nil {
+		return stopped.InPhase(stop, "during the ClamAV signature update")
+	}
+	fmt.Fprintf(env.Stderr, "scanproof: warning: freshclam failed, using the existing signatures: %v: %s\n",
+		err, strings.TrimSpace(string(out)))
+	return nil
 }
 
 func importResults(path string) (trivy.Scan, error) {
@@ -237,9 +247,10 @@ func importResults(path string) (trivy.Scan, error) {
 
 // evalSetup is the policy and exceptions every scan in a run is checked with.
 type evalSetup struct {
-	pol  policy.Policy
-	src  policy.Source
-	excs []exception.Exception
+	pol    policy.Policy
+	src    policy.Source
+	excs   []exception.Exception
+	excSrc exception.Source
 }
 
 func loadSetup(policyPath string, mode policy.Mode, exceptionsPath string) (evalSetup, error) {
@@ -255,7 +266,7 @@ func loadSetup(policyPath string, mode policy.Mode, exceptionsPath string) (eval
 	}
 	if exceptionsPath != "" {
 		var err error
-		if setup.excs, err = exception.Load(exceptionsPath); err != nil {
+		if setup.excs, setup.excSrc, err = exception.Load(exceptionsPath); err != nil {
 			return evalSetup{}, err
 		}
 	}
@@ -270,16 +281,17 @@ func buildDocument(env Env, setup evalSetup, res model.ScanResult, trigger strin
 		return report.Document{}, err
 	}
 	return report.Build(report.Input{
-		ReportID:     id,
-		GeneratedAt:  now,
-		Tool:         report.Tool{Name: "scanproof", Version: Version},
-		Trigger:      trigger,
-		Result:       res,
-		Evaluation:   policy.Evaluate(res, setup.pol, setup.excs, now),
-		Policy:       setup.pol,
-		PolicySource: setup.src,
-		Context:      ci,
-		Runtime:      rt,
+		ReportID:         id,
+		GeneratedAt:      now,
+		Tool:             report.Tool{Name: "scanproof", Version: Version},
+		Trigger:          trigger,
+		Result:           res,
+		Evaluation:       policy.Evaluate(res, setup.pol, setup.excs, now),
+		Policy:           setup.pol,
+		PolicySource:     setup.src,
+		ExceptionsSource: setup.excSrc,
+		Context:          ci,
+		Runtime:          rt,
 	}), nil
 }
 

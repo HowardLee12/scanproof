@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/HowardLee12/scanproof/internal/model"
+	"github.com/HowardLee12/scanproof/internal/stopped"
 )
 
 // maxStderr bounds how much of Trivy's stderr is copied into an error.
@@ -106,7 +106,7 @@ func (r Runner) scanArtifact(ctx context.Context, mode, target string, extra []s
 	args := append([]string{mode, "--quiet", "--format", "json", "--scanners", "vuln,secret", "--list-all-pkgs",
 		"--secret-config", config}, r.hardenedFlags()...)
 	args = append(args, extra...)
-	out, err := r.exec(ctx, r.Bin, append(args, target)...)
+	out, err := r.run(ctx, "during the Trivy scan", append(args, target)...)
 	if err != nil {
 		return Scan{}, fmt.Errorf("trivy scan of %s failed: %w", target, err)
 	}
@@ -123,17 +123,21 @@ func (r Runner) scanArtifact(ctx context.Context, mode, target string, extra []s
 // expiry date. Scans that look for secrets also pin --secret-config (see
 // scanArtifact); `trivy sbom` has no such flag.
 func (r Runner) hardenedFlags() []string {
-	timeout := r.Timeout
-	if timeout <= 0 {
-		timeout = defaultTimeout
-	}
 	return []string{
 		"--config", os.DevNull,
 		"--ignorefile", "",
 		"--severity", "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL",
 		"--ignore-unfixed=false",
-		"--timeout", timeout.String(),
+		"--timeout", r.timeout().String(),
 	}
+}
+
+// timeout is the --timeout Trivy gets.
+func (r Runner) timeout() time.Duration {
+	if r.Timeout <= 0 {
+		return defaultTimeout
+	}
+	return r.Timeout
 }
 
 // ScanSBOM checks a stored CycloneDX SBOM against today's vulnerability
@@ -150,7 +154,7 @@ func (r Runner) ScanSBOM(ctx context.Context, sbom []byte) (Scan, error) {
 		return Scan{}, fmt.Errorf("write SBOM: %w", err)
 	}
 	args := append([]string{"sbom", "--quiet", "--format", "json", "--scanners", "vuln"}, r.hardenedFlags()...)
-	out, err := r.exec(ctx, r.Bin, append(args, path)...)
+	out, err := r.run(ctx, "during the Trivy SBOM scan", append(args, path)...)
 	if err != nil {
 		return Scan{}, fmt.Errorf("trivy SBOM scan failed: %w", err)
 	}
@@ -197,7 +201,8 @@ func (r Runner) SBOM(ctx context.Context, raw []byte) ([]byte, error) {
 	if err := os.WriteFile(in, raw, 0o600); err != nil {
 		return nil, fmt.Errorf("write trivy report: %w", err)
 	}
-	if _, err := r.exec(ctx, r.Bin, "convert", "--format", "cyclonedx", "--output", out, in); err != nil {
+	args := []string{"convert", "--config", os.DevNull, "--timeout", r.timeout().String(), "--format", "cyclonedx", "--output", out, in}
+	if _, err := r.run(ctx, "during the SBOM conversion", args...); err != nil {
 		return nil, fmt.Errorf("convert trivy report to an SBOM: %w", err)
 	}
 	sbom, err := os.ReadFile(out)
@@ -205,6 +210,32 @@ func (r Runner) SBOM(ctx context.Context, raw []byte) ([]byte, error) {
 		return nil, fmt.Errorf("read SBOM: %w", err)
 	}
 	return sbom, nil
+}
+
+// run runs Trivy for one step. If Trivy was killed because the scan's
+// context ended, or reached its own --timeout (it then names whatever file
+// it was reading), the error says so and names the step, instead of
+// blaming the exit status or that file. Trivy's message stays the cause.
+func (r Runner) run(ctx context.Context, phase string, args ...string) ([]byte, error) {
+	start := time.Now()
+	out, err := r.exec(ctx, r.Bin, args...)
+	if err == nil {
+		return out, nil
+	}
+	if stopped.Is(err) {
+		return nil, stopped.InPhase(err, phase)
+	}
+	if r.reachedOwnTimeout(start, err) {
+		return nil, &stopped.Error{Phase: phase, Err: fmt.Errorf("%w: %w", context.DeadlineExceeded, err)}
+	}
+	return nil, err
+}
+
+// reachedOwnTimeout reports whether Trivy stopped at its --timeout: it says
+// "context deadline exceeded" and has run for at least that long. A
+// download that times out earlier is Trivy's own failure.
+func (r Runner) reachedOwnTimeout(start time.Time, err error) bool {
+	return time.Since(start) >= r.timeout() && strings.Contains(err.Error(), "context deadline exceeded")
 }
 
 func firstNonEmpty(values ...string) string {
@@ -218,11 +249,14 @@ func firstNonEmpty(values ...string) string {
 
 func defaultExec(ctx context.Context, name string, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := stopped.Command(ctx, name, args...)
 	cmd.Env = safeEnviron(os.Environ())
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if stop := cmd.Stopped(err); stop != nil {
+			return nil, stop
+		}
 		return nil, fmt.Errorf("%w: %s", err, tail(stderr.String(), maxStderr))
 	}
 	return stdout.Bytes(), nil

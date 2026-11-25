@@ -7,6 +7,7 @@ import (
 	"github.com/HowardLee12/scanproof/internal/inventory"
 	"github.com/HowardLee12/scanproof/internal/model"
 	"github.com/HowardLee12/scanproof/internal/report"
+	"github.com/HowardLee12/scanproof/internal/stopped"
 	"github.com/HowardLee12/scanproof/internal/store"
 	"github.com/HowardLee12/scanproof/internal/trivy"
 )
@@ -57,6 +58,10 @@ func rescanFromSBOM(ctx context.Context, env Env, st store.Store, runner trivy.R
 		scan, err := scanStoredSBOM(ctx, st, runner, e, img)
 		if err == nil {
 			return scan, e.ReportID, nil
+		}
+		if stopped.Check(ctx) != nil || stopped.Is(err) {
+			// Out of time, the scan's or Trivy's own: no older scan, no pull.
+			return trivy.Scan{}, "", stopped.InPhase(stopped.Cause(ctx, err), "while checking the stored SBOM")
 		}
 		fmt.Fprintf(env.Stderr, "scanproof: warning: %s: not using the SBOM from %s: %v\n", img.Label(), e.ReportID, err)
 		if first == nil {

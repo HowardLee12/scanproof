@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/HowardLee12/scanproof/internal/model"
+	"github.com/HowardLee12/scanproof/internal/stopped"
 	"github.com/HowardLee12/scanproof/internal/tree"
 	"github.com/HowardLee12/scanproof/internal/trivy"
 )
@@ -30,7 +31,7 @@ func scanDirectory(ctx context.Context, opts scanOptions, env Env) (trivy.Scan, 
 	binary := map[string]bool{}
 	before, err := tree.Digest(ctx, root, sniffBinary(binary))
 	if err != nil {
-		return trivy.Scan{}, fmt.Errorf("tree digest of %s: %w", root, err)
+		return trivy.Scan{}, stopped.InPhase(fmt.Errorf("tree digest of %s: %w", root, err), "during the first read of the directory")
 	}
 	scan, err := trivy.NewRunner(opts.TrivyBin, opts.Timeout).ScanRootfs(ctx, root)
 	if err != nil {
@@ -86,12 +87,14 @@ func readDirectoryAgain(ctx context.Context, opts scanOptions, env Env, root str
 	if !opts.Malware.Enabled {
 		res, err := tree.Digest(ctx, root, nil)
 		if err != nil {
-			return nil, tree.Result{}, fmt.Errorf("tree digest of %s: %w", root, err)
+			return nil, tree.Result{}, stopped.InPhase(fmt.Errorf("tree digest of %s: %w", root, err), "during the second read of the directory")
 		}
 		return nil, res, nil
 	}
 	if opts.Malware.Update {
-		updateSignatures(ctx, opts.Malware, env)
+		if err := updateSignatures(ctx, opts.Malware, env); err != nil {
+			return nil, tree.Result{}, err
+		}
 	}
 	return malwareScanner(opts, env).ScanDir(ctx, root)
 }

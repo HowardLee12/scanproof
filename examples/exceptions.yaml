@@ -20,3 +20,13 @@ exceptions:
     path: app/tests/fixtures/fake.ini
     reason: Documented example key used by tests.
     expires: 2026-12-31
+
+  # A central file, such as the one rescans use, should limit an exception to
+  # the images it is meant for. Name images without tag or digest, and
+  # directories as dir:NAME; a trailing * matches by prefix.
+  - id: EX-2026-011
+    finding: CVE-2025-22871
+    package: stdlib
+    artifact: cr.example.com/mirror/coredns/coredns
+    reason: Vendor image; the vendor ships the Go fix in its next release.
+    expires: 2027-01-31

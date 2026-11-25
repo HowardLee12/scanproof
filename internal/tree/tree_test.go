@@ -301,3 +301,10 @@ func TestDigestDetectsAFileThatChangesWhileRead(t *testing.T) {
 		t.Fatalf("a file that grows during the scan must be an error, got %v", err)
 	}
 }
+
+func mustRun(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}

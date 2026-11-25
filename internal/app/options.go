@@ -11,6 +11,7 @@ import (
 	"github.com/HowardLee12/scanproof/internal/model"
 	"github.com/HowardLee12/scanproof/internal/notify"
 	"github.com/HowardLee12/scanproof/internal/policy"
+	"github.com/HowardLee12/scanproof/internal/stopped"
 )
 
 type scanOptions struct {
@@ -41,16 +42,18 @@ type dirOptions struct {
 }
 
 type malwareOptions struct {
-	Enabled      bool
-	ClamscanBin  string
-	ClamAVDB     string
-	YaraRules    string
-	YaraBin      string
-	MaxFileMB    int64
-	WorkDir      string
-	DockerDaemon bool
-	Update       bool
-	FreshclamBin string
+	Enabled     bool
+	ClamscanBin string
+	ClamAVDB    string
+	YaraRules   string
+	YaraBin     string
+	MaxFileMB   int64
+	// MaxArchiveFiles is passed to clamscan as --max-files.
+	MaxArchiveFiles int
+	WorkDir         string
+	DockerDaemon    bool
+	Update          bool
+	FreshclamBin    string
 }
 
 // imageOnlyFlags make no sense for a directory and are refused with --dir.
@@ -130,6 +133,8 @@ func defineMalwareFlags(fs *flag.FlagSet, m *malwareOptions) {
 	fs.StringVar(&m.YaraRules, "yara-rules", "", "YARA rule file or directory; enables YARA")
 	fs.StringVar(&m.YaraBin, "yara", "yara", "path to the yara binary")
 	fs.Int64Var(&m.MaxFileMB, "malware-max-file-mb", 512, "skip (and list) files larger than this many MB")
+	fs.IntVar(&m.MaxArchiveFiles, "malware-max-archive-files", defaultMaxArchiveFiles,
+		"most files ClamAV scans inside one file, such as an archive; one with more is listed as not fully scanned")
 	fs.StringVar(&m.WorkDir, "malware-workdir", "", "where files are unpacked for the malware scan; needs room for the largest image layer, or about 1 GB plus the largest file for a directory")
 	fs.BoolVar(&m.DockerDaemon, "docker-daemon", true, "look for the image in the local Docker daemon before the registry")
 	fs.BoolVar(&m.Update, "clamav-update", false, "run freshclam before the malware scan (mind ClamAV's download limits)")
@@ -186,15 +191,34 @@ func withDirectory(opts scanOptions, rest []string, set map[string]bool) (scanOp
 	return opts, nil
 }
 
+// ClamAV's own default for the number of files it scans inside one file,
+// and the most ScanProof accepts: more is almost certainly a typo, and
+// ClamAV's time limit, which grows with it, would then allow hours per file.
+const (
+	defaultMaxArchiveFiles = 10000
+	maxMaxArchiveFiles     = 1000000
+)
+
 func validateScanOptions(opts scanOptions) error {
 	if opts.Malware.Enabled && opts.Image == "" && !opts.Dir.Enabled {
 		return errors.New("--malware needs the image reference, even with --trivy-results")
 	}
-	if opts.Malware.MaxFileMB <= 0 || opts.Malware.MaxFileMB > 4000 {
-		return errors.New("--malware-max-file-mb must be between 1 and 4000 (ClamAV's limit)")
+	if err := validateMalwareLimits(opts.Malware); err != nil {
+		return err
 	}
 	if opts.Timeout <= 0 {
 		return fmt.Errorf("--timeout must be greater than zero, got %s", opts.Timeout)
+	}
+	return nil
+}
+
+func validateMalwareLimits(m malwareOptions) error {
+	if m.MaxFileMB <= 0 || m.MaxFileMB > 4000 {
+		return errors.New("--malware-max-file-mb must be between 1 and 4000 (ClamAV's limit)")
+	}
+	if m.MaxArchiveFiles < 1 || m.MaxArchiveFiles > maxMaxArchiveFiles {
+		return fmt.Errorf("--malware-max-archive-files must be between 1 and %s, got %d",
+			stopped.Count(maxMaxArchiveFiles), m.MaxArchiveFiles)
 	}
 	return nil
 }

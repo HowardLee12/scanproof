@@ -6,6 +6,8 @@ package exception
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -69,32 +71,46 @@ type Exception struct {
 	Package string `yaml:"package,omitempty" json:"package,omitempty"`
 	// Path limits the exception to one file. It is required for secrets, so
 	// accepting a test fixture never accepts the same kind of secret elsewhere.
-	Path       string `yaml:"path,omitempty" json:"path,omitempty"`
-	Reason     string `yaml:"reason" json:"reason"`
-	ApprovedBy string `yaml:"approved_by,omitempty" json:"approved_by,omitempty"`
-	Expires    Date   `yaml:"expires" json:"expires"`
+	Path string `yaml:"path,omitempty" json:"path,omitempty"`
+	// Artifact limits the exception to some images and directories; without
+	// it the exception applies to every artifact it is used with.
+	Artifact   Artifacts `yaml:"artifact,omitempty" json:"artifact,omitempty"`
+	Reason     string    `yaml:"reason" json:"reason"`
+	ApprovedBy string    `yaml:"approved_by,omitempty" json:"approved_by,omitempty"`
+	Expires    Date      `yaml:"expires" json:"expires"`
 }
 
 type file struct {
 	Exceptions []Exception `yaml:"exceptions"`
 }
 
+// Source identifies the exceptions file a scan used, so its evidence shows
+// exactly which file it was.
+type Source struct {
+	Path   string
+	SHA256 string
+}
+
 // Load reads and validates an exceptions file.
-func Load(path string) ([]Exception, error) {
+func Load(path string) ([]Exception, Source, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read exceptions file %s: %w", path, err)
+		return nil, Source{}, fmt.Errorf("read exceptions file %s: %w", path, err)
 	}
 	list, err := Parse(data)
 	if err != nil {
-		return nil, fmt.Errorf("exceptions file %s: %w", path, err)
+		return nil, Source{}, fmt.Errorf("exceptions file %s: %w", path, err)
 	}
-	return list, nil
+	sum := sha256.Sum256(data)
+	return list, Source{Path: path, SHA256: hex.EncodeToString(sum[:])}, nil
 }
 
 // Parse decodes and validates exceptions. Unknown keys are rejected so that a
 // typo such as "expire:" cannot silently create an exception that never ends.
 func Parse(data []byte) ([]Exception, error) {
+	if err := checkStructure(data); err != nil {
+		return nil, err
+	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	var f file
@@ -127,6 +143,9 @@ func validate(list []Exception) error {
 			return fmt.Errorf("%s: use package for a vulnerability or path for a secret, not both", where)
 		case seen[ex.ID]:
 			return fmt.Errorf("%s: duplicate id", where)
+		}
+		if err := ex.Artifact.validate(); err != nil {
+			return fmt.Errorf("%s: %w", where, err)
 		}
 		seen[ex.ID] = true
 	}

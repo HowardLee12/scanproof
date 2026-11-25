@@ -54,6 +54,7 @@ type Summary struct {
 // TreeDigest.
 type MalwareSection struct {
 	Engines      []model.MalwareEngine   `json:"engines"`
+	Limits       *model.MalwareLimits    `json:"limits,omitempty"`
 	ImageSource  string                  `json:"image_source,omitempty"`
 	ConfigDigest string                  `json:"config_digest,omitempty"`
 	TreeDigest   string                  `json:"tree_digest,omitempty"`
@@ -76,11 +77,39 @@ type PolicyInfo struct {
 	Rules        []policy.RuleResult `json:"rules"`
 }
 
-// Exceptions groups exceptions by how they affected this scan.
+// Exceptions groups exceptions by how they affected this scan, and names
+// the file they came from. Source, SHA256 and OutOfScope are empty in
+// results written before they were recorded, and without a file.
 type Exceptions struct {
-	Applied []exception.Exception `json:"applied"`
-	Expired []exception.Exception `json:"expired"`
-	Unused  []exception.Exception `json:"unused"`
+	Source     string                `json:"source,omitempty"`
+	SHA256     string                `json:"sha256,omitempty"`
+	Applied    []exception.Exception `json:"applied"`
+	Expired    []exception.Exception `json:"expired"`
+	Unused     []exception.Exception `json:"unused"`
+	OutOfScope *OutOfScope           `json:"out_of_scope,omitempty"`
+}
+
+// OutOfScope counts the exceptions in the file that are limited to other
+// images and directories, and lists their IDs when there are few.
+type OutOfScope struct {
+	Count int      `json:"count"`
+	IDs   []string `json:"ids,omitempty"`
+}
+
+// maxOutOfScopeIDs bounds the IDs listed; a central file can hold many.
+const maxOutOfScopeIDs = 20
+
+func outOfScope(list []exception.Exception) *OutOfScope {
+	if len(list) == 0 {
+		return nil
+	}
+	out := &OutOfScope{Count: len(list)}
+	if len(list) <= maxOutOfScopeIDs {
+		for _, ex := range list {
+			out.IDs = append(out.IDs, ex.ID)
+		}
+	}
+	return out
 }
 
 // Document is the content of results.json and the source of every other output.
@@ -138,8 +167,10 @@ type Input struct {
 	Evaluation   policy.Evaluation
 	Policy       policy.Policy
 	PolicySource policy.Source
-	Context      cicontext.Context
-	Runtime      *Runtime
+	// ExceptionsSource is the exceptions file; empty when none was used.
+	ExceptionsSource exception.Source
+	Context          cicontext.Context
+	Runtime          *Runtime
 }
 
 // Build assembles the report document. Findings are sorted with the most
@@ -174,9 +205,12 @@ func Build(in Input) Document {
 		Secrets:         orEmpty(ev.Secrets),
 		Malware:         malwareSection(in.Result.Malware, ev.Malware),
 		Exceptions: Exceptions{
-			Applied: orEmpty(ev.Applied),
-			Expired: orEmpty(ev.Expired),
-			Unused:  orEmpty(ev.Unused),
+			Source:     in.ExceptionsSource.Path,
+			SHA256:     in.ExceptionsSource.SHA256,
+			Applied:    orEmpty(ev.Applied),
+			Expired:    orEmpty(ev.Expired),
+			Unused:     orEmpty(ev.Unused),
+			OutOfScope: outOfScope(ev.OutOfScope),
 		},
 	}
 }
@@ -248,6 +282,7 @@ func malwareSection(scan *model.MalwareScan, findings []policy.MalwareFinding) *
 	}
 	return &MalwareSection{
 		Engines:      orEmpty(scan.Engines),
+		Limits:       scan.Limits,
 		ImageSource:  scan.ImageSource,
 		ConfigDigest: scan.ConfigDigest,
 		TreeDigest:   scan.TreeDigest,

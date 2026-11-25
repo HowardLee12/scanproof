@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/HowardLee12/scanproof/internal/stopped"
 )
 
 //go:embed templates/common.typ
@@ -85,10 +87,13 @@ func (r PDFRenderer) RenderTemplate(ctx context.Context, template []byte, data a
 
 func runCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := stopped.Command(ctx, name, args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if stop := cmd.Stopped(err); stop != nil {
+			return nil, stopped.InPhase(stop, "while making the PDF")
+		}
 		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
