@@ -235,7 +235,11 @@ func writeExceptions(b *strings.Builder, e Exceptions) {
 }
 
 func describeException(ex exception.Exception, verb string) string {
-	return fmt.Sprintf("%s (%s, %s %s)", cell(ex.ID), cell(ex.Finding), verb, ex.Expires)
+	finding := ex.Finding
+	if scope := ex.Scope(); scope != "" {
+		finding += ", " + scope
+	}
+	return fmt.Sprintf("%s (%s, %s %s)", cell(ex.ID), cell(finding), verb, ex.Expires)
 }
 
 // cell makes text safe inside a Markdown table cell.

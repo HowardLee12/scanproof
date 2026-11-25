@@ -140,8 +140,11 @@ func TestLoadFromFile(t *testing.T) {
 
 func TestExampleExceptionsAreValid(t *testing.T) {
 	list, err := Load("../../examples/exceptions.yaml")
-	if err != nil || len(list) != 2 {
+	if err != nil || len(list) != 3 {
 		t.Fatalf("got %d exceptions, %v", len(list), err)
+	}
+	if !list[2].AppliesTo("cr.example.com/mirror/coredns/coredns") || list[2].AppliesTo("example-api") {
+		t.Errorf("the scoped example should apply to its image only: %+v", list[2])
 	}
 }
 

@@ -325,6 +325,9 @@ func exceptionRows(list []exception.Exception) [][]string {
 		if ex.Package != "" {
 			finding += " in " + ex.Package
 		}
+		if scope := ex.Scope(); scope != "" {
+			finding += ", " + scope
+		}
 		approver := ex.ApprovedBy
 		if approver == "" {
 			approver = "See the pull request that added it"

@@ -69,10 +69,13 @@ type Exception struct {
 	Package string `yaml:"package,omitempty" json:"package,omitempty"`
 	// Path limits the exception to one file. It is required for secrets, so
 	// accepting a test fixture never accepts the same kind of secret elsewhere.
-	Path       string `yaml:"path,omitempty" json:"path,omitempty"`
-	Reason     string `yaml:"reason" json:"reason"`
-	ApprovedBy string `yaml:"approved_by,omitempty" json:"approved_by,omitempty"`
-	Expires    Date   `yaml:"expires" json:"expires"`
+	Path string `yaml:"path,omitempty" json:"path,omitempty"`
+	// Artifact limits the exception to some images and directories; without
+	// it the exception applies to every artifact it is used with.
+	Artifact   Artifacts `yaml:"artifact,omitempty" json:"artifact,omitempty"`
+	Reason     string    `yaml:"reason" json:"reason"`
+	ApprovedBy string    `yaml:"approved_by,omitempty" json:"approved_by,omitempty"`
+	Expires    Date      `yaml:"expires" json:"expires"`
 }
 
 type file struct {
@@ -127,6 +130,9 @@ func validate(list []Exception) error {
 			return fmt.Errorf("%s: use package for a vulnerability or path for a secret, not both", where)
 		case seen[ex.ID]:
 			return fmt.Errorf("%s: duplicate id", where)
+		}
+		if err := ex.Artifact.validate(); err != nil {
+			return fmt.Errorf("%s: %w", where, err)
 		}
 		seen[ex.ID] = true
 	}

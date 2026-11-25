@@ -68,14 +68,7 @@ func imageName(ref string) string {
 // dir:NAME for a directory, so every version of a directory is compared
 // with the others and never with an image of the same name.
 func artifactName(doc report.Document) string {
-	if !doc.IsDirectory() {
-		return imageName(doc.Image.Reference)
-	}
-	name, _, ok := model.ParseDirectoryReference(doc.Image.Reference)
-	if !ok && doc.Directory != nil {
-		name = doc.Directory.Name
-	}
-	return model.DirectoryReference(name, "")
+	return model.ArtifactName(doc.ArtifactType, doc.Image.Reference, doc.Directory)
 }
 
 // status of one finding in one day's scans of an image name.

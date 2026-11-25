@@ -71,10 +71,11 @@ type Evaluation struct {
 	Verdict Verdict
 }
 
-// Evaluate applies exceptions and the policy to a scan result. It does not
-// modify its inputs.
+// Evaluate applies exceptions and the policy to a scan result. Exceptions
+// limited to other artifacts are left out entirely: they neither accept
+// findings nor count as unused. It does not modify its inputs.
 func Evaluate(res model.ScanResult, p Policy, excs []exception.Exception, now time.Time) Evaluation {
-	tracker := newExceptionTracker(excs, now)
+	tracker := newExceptionTracker(inScope(excs, res.ArtifactName()), now)
 
 	vulns := make([]VulnerabilityFinding, 0, len(res.Vulnerabilities))
 	vulnViolations := 0
@@ -175,6 +176,17 @@ type exceptionTracker struct {
 	now     time.Time
 	used    map[string]bool
 	expired map[string]bool
+}
+
+// inScope returns the exceptions that apply to the named artifact.
+func inScope(list []exception.Exception, artifact string) []exception.Exception {
+	out := make([]exception.Exception, 0, len(list))
+	for _, ex := range list {
+		if ex.AppliesTo(artifact) {
+			out = append(out, ex)
+		}
+	}
+	return out
 }
 
 func newExceptionTracker(list []exception.Exception, now time.Time) *exceptionTracker {
