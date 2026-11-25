@@ -3,8 +3,11 @@ package exception
 import (
 	"errors"
 	"fmt"
+	"regexp"
+	"slices"
 	"strings"
 
+	ggcrname "github.com/google/go-containerregistry/pkg/name"
 	"gopkg.in/yaml.v3"
 
 	"github.com/HowardLee12/scanproof/internal/model"
@@ -31,6 +34,9 @@ func (a *Artifacts) UnmarshalYAML(node *yaml.Node) error {
 			if item.Kind != yaml.ScalarNode {
 				return shapeError(node)
 			}
+			if item.Tag == nullTag {
+				return fmt.Errorf("line %d: artifact: a name cannot be empty", item.Line)
+			}
 			names = append(names, item.Value)
 		}
 		*a = names
@@ -41,6 +47,45 @@ func (a *Artifacts) UnmarshalYAML(node *yaml.Node) error {
 
 func shapeError(node *yaml.Node) error {
 	return fmt.Errorf("line %d: artifact must be a name or a list of names", node.Line)
+}
+
+const nullTag = "!!null"
+
+// checkNullArtifacts refuses "artifact:" without a value. YAML decodes it
+// as if the key were missing, which would widen the exception to every
+// artifact instead of failing.
+func checkNullArtifacts(data []byte) error {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil || len(doc.Content) == 0 {
+		return nil // the decoder reports syntax errors
+	}
+	list := mappingValue(doc.Content[0], "exceptions")
+	if list == nil || list.Kind != yaml.SequenceNode {
+		return nil
+	}
+	for i, item := range list.Content {
+		if v := mappingValue(item, "artifact"); v != nil && v.Tag == nullTag {
+			where := fmt.Sprintf("exception %d", i+1)
+			if id := mappingValue(item, "id"); id != nil && id.Value != "" {
+				where = "exception " + id.Value
+			}
+			return fmt.Errorf("%s: artifact has no value; leave it out to apply the exception to every image and directory", where)
+		}
+	}
+	return nil
+}
+
+// mappingValue returns the value of key in a YAML mapping, or nil.
+func mappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
 }
 
 // validate checks every name. A nil list (no artifact key) is fine; an
@@ -72,7 +117,7 @@ func validateArtifact(name string) error {
 	if dir, ok := strings.CutPrefix(prefix, directoryPrefix); ok {
 		return validateDirectory(name, dir, glob)
 	}
-	return validateImage(name, prefix)
+	return validateImage(name, prefix, glob)
 }
 
 func validateDirectory(name, dir string, glob bool) error {
@@ -91,14 +136,39 @@ func validateDirectory(name, dir string, glob bool) error {
 	return nil
 }
 
-func validateImage(name, prefix string) error {
-	if strings.Contains(prefix, "@") {
+// validateImage checks an image name, or the part of a pattern before its
+// *, with go-containerregistry's rules for a repository, so a name that
+// could never match (upper case, an empty part) is refused.
+func validateImage(name, prefix string, glob bool) error {
+	switch {
+	case strings.Contains(prefix, "@"):
 		return fmt.Errorf("artifact %q: drop the digest; an exception applies to every tag and digest of an image", name)
-	}
-	if model.ImageName(prefix) != prefix {
+	case glob && registryPort.MatchString(prefix):
+		return fmt.Errorf("artifact %q: put / after a registry port, as in %s/*", name, prefix)
+	case model.ImageName(prefix) != prefix:
 		return fmt.Errorf("artifact %q: drop the tag; an exception applies to every tag and digest of an image", name)
 	}
+	path := prefix
+	if glob {
+		path = strings.TrimSuffix(prefix, "/")
+	}
+	if slices.Contains(strings.Split(path, "/"), "") {
+		return fmt.Errorf("artifact %q: a name cannot have an empty part between slashes", name)
+	}
+	if _, err := ggcrname.NewRepository(path + pick(glob, "x", "")); err != nil {
+		return fmt.Errorf("artifact %q: not an image name: %w", name, err)
+	}
 	return nil
+}
+
+// registryPort matches a registry host and port with nothing after it.
+var registryPort = regexp.MustCompile(`^[^/]+:[0-9]+$`)
+
+func pick(cond bool, yes, no string) string {
+	if cond {
+		return yes
+	}
+	return no
 }
 
 // AppliesTo reports whether the exception covers findings in the artifact

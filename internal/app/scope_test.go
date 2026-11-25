@@ -76,6 +76,11 @@ exceptions:
     artifact: ["repo/*", "dir:acme-vllm"]
     reason: ssl_client is not used.
     expires: 2027-02-28
+  - id: EX-GONE
+    finding: CVE-2022-48174
+    artifact: cr.example.com/retired/app
+    reason: The image was retired.
+    expires: 2027-02-28
 `
 
 func TestRescanScopesACentralExceptionsFilePerImage(t *testing.T) {
@@ -97,6 +102,10 @@ func TestRescanScopesACentralExceptionsFilePerImage(t *testing.T) {
 		"--trivy", trivyBin, "--exceptions", excs, "--out", t.TempDir(), "--notify", "never")
 	if code != 0 {
 		t.Fatalf("code %d: %s", code, h.stderr.String())
+	}
+	warning := "scanproof: warning: exception EX-GONE is limited to cr.example.com/retired/app, which matched no running image or directory"
+	if stderr := h.stderr.String(); !strings.Contains(stderr, warning) || strings.Count(stderr, "matched no running") != 1 {
+		t.Errorf("a scoped exception that matches nothing running should be named once: %q", stderr)
 	}
 	byRef := map[string]map[string]any{}
 	for _, doc := range storedResults(t, storeDir)["rescan"] {

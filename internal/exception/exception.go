@@ -104,6 +104,9 @@ func Parse(data []byte) ([]Exception, error) {
 	if err := dec.Decode(&f); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse exceptions: %w", err)
 	}
+	if err := checkNullArtifacts(data); err != nil {
+		return nil, err
+	}
 	if err := validate(f.Exceptions); err != nil {
 		return nil, err
 	}

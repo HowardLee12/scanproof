@@ -50,7 +50,7 @@ exceptions:
     expires: 2027-01-31
 ```
 
-Each rescanned image is matched by its running reference without tag or digest, and each directory by `dir:NAME`. See [Limiting an exception to some images](../README.md#limiting-an-exception-to-some-images) for lists and `*` prefixes.
+Each rescanned image is matched by its running reference without tag or digest, and each directory by `dir:NAME`. See [Limiting an exception to some images](../README.md#limiting-an-exception-to-some-images) for lists and `*` prefixes. An exception limited to images that are not running anywhere is left out of every report, so the rescan prints a warning for it, for example `scanproof: warning: exception EX-2026-011 is limited to cr.example.com/mirror/coredns/coredns, which matched no running image or directory`.
 
 ## Kubernetes
 

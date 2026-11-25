@@ -156,6 +156,7 @@ func runRescan(ctx context.Context, args []string, env Env) int {
 		return fail(env, err)
 	}
 	images, failures := listRunning(ctx, opts)
+	warnUnmatchedScopes(env, setup.excs, images)
 	outcomes := append(inventoryOutcomes(env, failures), rescanAll(ctx, opts, env, st, setup, images)...)
 	sendRescanNotification(ctx, opts, env, outcomes)
 	return finishRescan(env, outcomes, images)

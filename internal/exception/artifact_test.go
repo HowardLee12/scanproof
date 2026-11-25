@@ -55,6 +55,18 @@ func TestParseRejectsBadArtifactScopes(t *testing.T) {
 		`"cr.example.com/mirror/app:*"`:    "drop the tag",
 		`"example api"`:                    `artifact "example api": a name cannot contain spaces`,
 		"{name: example-api}":              "artifact must be a name or a list of names",
+		"":                                 "exception EX-1: artifact has no value; leave it out to apply the exception to every image and directory",
+		"null":                             "artifact has no value",
+		"~":                                "artifact has no value",
+		"[example-api, ~]":                 "a name cannot be empty",
+		"[null]":                           "a name cannot be empty",
+		`"cr.example.com/app/"`:            `artifact "cr.example.com/app/": a name cannot have an empty part between slashes`,
+		`"/app"`:                           "a name cannot have an empty part between slashes",
+		`"cr.example.com//app"`:            "a name cannot have an empty part between slashes",
+		`"cr.example.com//*"`:              "a name cannot have an empty part between slashes",
+		`"Cr.Example.com/App"`:             `artifact "Cr.Example.com/App": not an image name: repository can only contain`,
+		`"cr.example.com/App*"`:            "not an image name",
+		`"localhost:5000*"`:                `artifact "localhost:5000*": put / after a registry port, as in localhost:5000/*`,
 		"[[example-api]]":                  "artifact must be a name or a list of names",
 	}
 	for in, want := range cases {
